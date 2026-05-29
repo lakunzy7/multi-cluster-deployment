@@ -80,6 +80,10 @@ jobs:
               document-start: disable
               truthy: { check-keys: false }
               comments: { min-spaces-from-content: 1 }
+              indentation:
+                spaces: consistent
+                indent-sequences: consistent
+                check-multi-line-strings: false
 
   terraform-validate:
     name: Terraform validate + fmt
