@@ -16,7 +16,7 @@ spec:
     spec:
       vars:
         - name: gitRepo
-          value: https://github.com/CHANGE-ME/multi-cluster-deployment.git
+          value: https://github.com/lakunzy7/multi-cluster-deployment.git
         - name: gitBranch
           value: main
         - name: imageRepo
