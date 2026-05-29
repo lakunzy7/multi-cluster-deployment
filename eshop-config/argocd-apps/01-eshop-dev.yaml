@@ -1,36 +1,47 @@
 ---
-# eShop dev — auto-sync, lives on the Kind cluster
+# eShop dev — ApplicationSet fanning out to every cluster labeled env=multi.
+# Generates one Application per matching cluster: eshop-dev-<region>.
+# Auto-sync. Both regions deploy independently from the same overlay.
 apiVersion: argoproj.io/v1alpha1
-kind: Application
+kind: ApplicationSet
 metadata:
   name: eshop-dev
   namespace: argocd
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
 spec:
-  project: eshop
-  source:
-    repoURL: https://github.com/lakunzy7/multi-cluster-deployment.git
-    targetRevision: main
-    path: eshop-config/overlays/dev
-  destination:
-    name: in-cluster
-    namespace: eshop-dev
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - CreateNamespace=true
-      - ServerSideApply=true
-    retry:
-      limit: 5
-      backoff:
-        duration: 5s
-        factor: 2
-        maxDuration: 3m
-  ignoreDifferences:
-    - group: apps
-      kind: Deployment
-      jsonPointers:
-        - /spec/replicas
+  generators:
+    - clusters:
+        selector:
+          matchLabels:
+            env: multi
+  template:
+    metadata:
+      name: 'eshop-dev-{{metadata.labels.region}}'
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: eshop
+      source:
+        repoURL: https://github.com/lakunzy7/multi-cluster-deployment.git
+        targetRevision: main
+        path: eshop-config/overlays/dev
+      destination:
+        name: '{{name}}'
+        namespace: eshop-dev
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 5s
+            factor: 2
+            maxDuration: 3m
+      ignoreDifferences:
+        - group: apps
+          kind: Deployment
+          jsonPointers:
+            - /spec/replicas

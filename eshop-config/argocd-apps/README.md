@@ -1,52 +1,81 @@
-# ArgoCD Applications for eShop
+# ArgoCD ApplicationSets for eShop (multi-cluster fan-out)
 
-Three `Application`s + one `AppProject`, one per environment. All point at the same git repo (this one) but at different overlays and different destination clusters.
+Three `ApplicationSet`s + one `AppProject`. Each ApplicationSet uses a **cluster generator** that matches every cluster labeled `env: multi`, producing one `Application` per (environment, region) pair.
+
+Currently 6 generated Applications (2 clusters × 3 envs). Add a new cluster with `env=multi` and 3 more Applications appear automatically.
 
 ## Files
 
 | File | What it creates |
 |---|---|
-| `00-project.yaml` | `AppProject eshop` — allowlist of repos, clusters, and namespaces |
-| `01-eshop-dev.yaml` | `Application eshop-dev` → in-cluster (Kind), ns `eshop-dev`, **auto-sync** |
-| `02-eshop-staging.yaml` | `Application eshop-staging` → in-cluster (Kind), ns `eshop-staging`, **auto-sync** |
-| `03-eshop-prod.yaml` | `Application eshop-prod` → `gke-cloud-cluster`, ns `eshop-prod`, **manual sync** |
+| `00-project.yaml` | `AppProject eshop` — repo allowlist + name-wildcard destinations (any cluster, the 3 eshop-* namespaces) |
+| `01-eshop-dev.yaml` | `ApplicationSet eshop-dev` → `eshop-dev-<region>` Apps, auto-sync |
+| `02-eshop-staging.yaml` | `ApplicationSet eshop-staging` → `eshop-staging-<region>` Apps, auto-sync |
+| `03-eshop-prod.yaml` | `ApplicationSet eshop-prod` → `eshop-prod-<region>` Apps, manual sync |
 
 ## Topology
 
 ```
-                ┌────────────────────────────────────────┐
-                │   Kind cluster: cloudopshub-local      │
-                │   (ArgoCD + Kargo + cert-manager)      │
-                │                                        │
-                │   ns: eshop-dev      ← Application     │
-                │   ns: eshop-staging  ← Application     │
-                └────────────────────────────────────────┘
-                                  │
-                                  │   Application: eshop-prod
-                                  ▼
-                ┌────────────────────────────────────────┐
-                │   GKE cluster: cloud-cluster           │
-                │   (zonal europe-west1-b, 2× Spot)      │
-                │                                        │
-                │   ns: eshop-prod                       │
-                └────────────────────────────────────────┘
+                                       eshop-config/overlays/
+                                       ├── dev/
+                                       ├── staging/
+                                       └── prod/
+                                              │
+                              ┌───────────────┴───────────────┐
+                              │ ApplicationSet (cluster gen)  │
+                              └───────┬───────────────┬───────┘
+                                      │               │
+                                      ▼               ▼
+                            ┌──────────────┐  ┌──────────────┐
+                            │ Kind         │  │ GKE          │
+                            │ region=local │  │ region=eu-w1 │
+                            │              │  │              │
+                            │ ns: eshop-dev│  │ ns: eshop-dev│
+                            │ ns: eshop-stg│  │ ns: eshop-stg│
+                            │ ns: eshop-prd│  │ ns: eshop-prd│
+                            └──────────────┘  └──────────────┘
 ```
+
+Both clusters get every environment in their own namespace. They serve different geographic regions; the same git overlay drives both.
+
+## Cluster selection
+
+ApplicationSets target via label, not name:
+
+```yaml
+generators:
+  - clusters:
+      selector:
+        matchLabels:
+          env: multi
+```
+
+Cluster Secrets must carry that label. Currently labeled:
+
+| Cluster | env | region |
+|---|---|---|
+| `in-cluster` (Kind) | `multi` | `local` |
+| `gke-cloud-cluster` (GKE) | `multi` | `europe-west1` |
+
+To add a new region, register the cluster (see `../argocd-clusters/HOW-TO-ADD-CLUSTER.md`) with labels `env=multi, region=<name>`. The ApplicationSets fan out to it automatically — no edits here.
 
 ## Sync policy alignment with Kargo
 
-This matches the Kargo gating in `eshop-config/kargo/`:
-
-| Stage | Kargo `autoPromotionEnabled` | ArgoCD `syncPolicy.automated` |
+| Stage | Kargo `autoPromotionEnabled` | ApplicationSet `automated` |
 |---|---|---|
 | dev | true | yes |
 | staging | true | yes |
-| prod | **false** | **no** (manual sync only) |
+| prod | **false** | **no** (manual per region) |
 
-When Kargo promotes to prod, it does the **git commit** that updates `eshop-config/overlays/prod/kustomization.yaml` with the new image tag. The actual rollout still requires `argocd app sync eshop-prod` (or a click in the UI). Two gates instead of one — deliberate for prod.
+Prod requires:
+1. Kargo promotion (commits the new image tag to `overlays/prod/`)
+2. Manual `argocd app sync eshop-prod-local` **and** `argocd app sync eshop-prod-europe-west1`
+
+Two gates per region — deliberate.
 
 ## Bootstrap
 
-Prerequisite: GKE cluster registered (see `../argocd-clusters/HOW-TO-ADD-CLUSTER.md`).
+Prerequisites: both clusters registered + labeled (see `../argocd-clusters/`).
 
 ```bash
 kubectl --context kind-cloudopshub-local apply -f eshop-config/argocd-apps/
@@ -55,26 +84,41 @@ kubectl --context kind-cloudopshub-local apply -f eshop-config/argocd-apps/
 ## Verify
 
 ```bash
+kubectl -n argocd get applicationsets
+kubectl -n argocd get applications
 argocd app list
-# expected: eshop-dev, eshop-staging, eshop-prod
-
-argocd app get eshop-dev
-argocd app get eshop-prod    # SYNC STATUS will be OutOfSync until you sync manually
 ```
 
-## Manual prod sync
+Expected output (6 Apps):
+
+```
+eshop-dev-local             in-cluster         eshop-dev      Auto-Prune
+eshop-dev-europe-west1      gke-cloud-cluster  eshop-dev      Auto-Prune
+eshop-staging-local         in-cluster         eshop-staging  Auto-Prune
+eshop-staging-europe-west1  gke-cloud-cluster  eshop-staging  Auto-Prune
+eshop-prod-local            in-cluster         eshop-prod     Manual
+eshop-prod-europe-west1     gke-cloud-cluster  eshop-prod     Manual
+```
+
+## Manual prod rollout
 
 ```bash
-# Preview
-argocd app diff eshop-prod
+# Roll out to one region at a time (canary-style)
+argocd app sync eshop-prod-europe-west1
+argocd app wait eshop-prod-europe-west1 --health
+# Then the other region
+argocd app sync eshop-prod-local
 
-# Apply
-argocd app sync eshop-prod
-
-# Watch rollout
-argocd app wait eshop-prod --health
+# OR: roll out everywhere at once
+argocd app sync -l app.kubernetes.io/instance=eshop-prod
 ```
 
-## Self-management (optional next step)
+## Removing a region
 
-These Application manifests themselves can be put under ArgoCD management via an **App-of-Apps** pattern — a single `Application` that watches this directory and creates/updates the others. That makes the registration declarative end-to-end. Not set up yet.
+Delete the cluster Secret (or remove the `env=multi` label) and ArgoCD will prune that region's generated Applications:
+
+```bash
+kubectl -n argocd label secret gke-cloud-cluster env-
+```
+
+The ApplicationSet controller detects the cluster no longer matches and deletes the corresponding Applications. Workloads in the removed region are torn down (because `prune: true` on dev/staging) — for prod, you'd want to disable pruning first.

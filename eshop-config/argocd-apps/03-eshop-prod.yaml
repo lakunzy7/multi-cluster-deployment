@@ -1,37 +1,46 @@
 ---
-# eShop prod — MANUAL sync, lives on the GKE cloud-cluster.
-# Auto-sync is intentionally OFF so promotions to prod require explicit approval
-# (matches the Kargo gating: dev=auto, staging=auto, prod=manual).
+# eShop prod — ApplicationSet fanning out to every cluster labeled env=multi.
+# Generates one Application per matching cluster: eshop-prod-<region>.
+# MANUAL sync per region. Both regions must be synced explicitly to roll out prod.
+# Matches the Kargo gating (prod autoPromotionEnabled: false).
 apiVersion: argoproj.io/v1alpha1
-kind: Application
+kind: ApplicationSet
 metadata:
   name: eshop-prod
   namespace: argocd
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
 spec:
-  project: eshop
-  source:
-    repoURL: https://github.com/lakunzy7/multi-cluster-deployment.git
-    targetRevision: main
-    path: eshop-config/overlays/prod
-  destination:
-    name: gke-cloud-cluster
-    namespace: eshop-prod
-  # No syncPolicy.automated → sync only when triggered manually
-  # (UI button, `argocd app sync eshop-prod`, or kargo promote)
-  syncPolicy:
-    syncOptions:
-      - CreateNamespace=true
-      - ServerSideApply=true
-    retry:
-      limit: 3
-      backoff:
-        duration: 10s
-        factor: 2
-        maxDuration: 5m
-  ignoreDifferences:
-    - group: apps
-      kind: Deployment
-      jsonPointers:
-        - /spec/replicas
+  generators:
+    - clusters:
+        selector:
+          matchLabels:
+            env: multi
+  template:
+    metadata:
+      name: 'eshop-prod-{{metadata.labels.region}}'
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: eshop
+      source:
+        repoURL: https://github.com/lakunzy7/multi-cluster-deployment.git
+        targetRevision: main
+        path: eshop-config/overlays/prod
+      destination:
+        name: '{{name}}'
+        namespace: eshop-prod
+      # No syncPolicy.automated → manual rollout per region.
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+        retry:
+          limit: 3
+          backoff:
+            duration: 10s
+            factor: 2
+            maxDuration: 5m
+      ignoreDifferences:
+        - group: apps
+          kind: Deployment
+          jsonPointers:
+            - /spec/replicas
