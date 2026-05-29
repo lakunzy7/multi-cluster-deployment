@@ -1,0 +1,96 @@
+# Install ArgoCD on the primary (local) cluster
+# This ArgoCD instance will manage deployments to all clusters
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argocd
+---
+# Download and apply the official ArgoCD manifests:
+# kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+
+# Expose ArgoCD API Server (required for multi-cluster communication)
+apiVersion: v1
+kind: Service
+metadata:
+  name: argocd-server-nodeport
+  namespace: argocd
+spec:
+  type: NodePort
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    nodePort: 30080
+  - name: https
+    port: 443
+    targetPort: 8443
+    nodePort: 30443
+  selector:
+    app.kubernetes.io/name: argocd-server
+---
+# ConfigMap for ArgoCD clusters configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-clusters-config
+  namespace: argocd
+data:
+  clusters.json: |
+    {
+      "clusters": [
+        {
+          "name": "local-cluster",
+          "server": "https://local-cp:6443",
+          "description": "Local self-managed Kubernetes cluster",
+          "insecureSkipServerCertificateCheck": false
+        },
+        {
+          "name": "cloud-cluster",
+          "server": "https://cloud-eks-endpoint:443",
+          "description": "Cloud-managed EKS cluster",
+          "insecureSkipServerCertificateCheck": false
+        }
+      ]
+    }
+---
+# Role for ArgoCD to manage other clusters
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: argocd-multi-cluster-manager
+rules:
+- apiGroups: [""]
+  resources: ["namespaces", "secrets", "configmaps", "serviceaccounts"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "statefulsets", "daemonsets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["batch"]
+  resources: ["jobs", "cronjobs"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["services", "endpoints", "persistentvolumeclaims"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["ingresses"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list"]
+  resourceNames: ["argocd-cluster-credentials"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: argocd-multi-cluster-manager
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: argocd-multi-cluster-manager
+subjects:
+- kind: ServiceAccount
+  name: argocd-application-controller
+  namespace: argocd
+- kind: ServiceAccount
+  name: argocd-server
+  namespace: argocd

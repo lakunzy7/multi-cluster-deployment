@@ -1,0 +1,100 @@
+stages:
+  - build
+  - scan
+  - push
+  - deploy-dev
+  - deploy-staging
+  - deploy-prod
+
+variables:
+  REGISTRY: docker.io
+  IMAGE_NAME: cloudopshub/analytics-platform
+  DOCKER_DRIVER: overlay2
+
+.docker_build:
+  image: docker:24
+  services:
+    - docker:24-dind
+  before_script:
+    - echo $DOCKER_PASSWORD | docker login -u $DOCKER_USERNAME --password-stdin $REGISTRY
+
+build_image:
+  extends: .docker_build
+  stage: build
+  script:
+    - docker build -t $REGISTRY/$IMAGE_NAME:$CI_COMMIT_SHA -f Dockerfile .
+    - docker save $REGISTRY/$IMAGE_NAME:$CI_COMMIT_SHA > image.tar
+  artifacts:
+    paths:
+      - image.tar
+    expire_in: 1 day
+
+scan_vulnerabilities:
+  stage: scan
+  image: aquasec/trivy:latest
+  script:
+    - trivy image --severity HIGH,CRITICAL --exit-code 0 $REGISTRY/$IMAGE_NAME:$CI_COMMIT_SHA
+  allow_failure: true
+
+scan_secrets:
+  stage: scan
+  image: zricethezav/gitleaks:latest
+  script:
+    - gitleaks detect --source . --verbose --exit-code 0
+  allow_failure: true
+
+push_image:
+  extends: .docker_build
+  stage: push
+  script:
+    - docker build -t $REGISTRY/$IMAGE_NAME:$CI_COMMIT_SHA .
+    - docker tag $REGISTRY/$IMAGE_NAME:$CI_COMMIT_SHA $REGISTRY/$IMAGE_NAME:latest
+    - docker push $REGISTRY/$IMAGE_NAME:$CI_COMMIT_SHA
+    - docker push $REGISTRY/$IMAGE_NAME:latest
+  only:
+    - main
+    - develop
+
+deploy_dev:
+  stage: deploy-dev
+  image: alpine/k8s:latest
+  script:
+    - kubectl config use-context local-cluster
+    - kubectl set image deployment/analytics-platform -n dev analytics=$REGISTRY/$IMAGE_NAME:$CI_COMMIT_SHA --record
+    - kubectl rollout status deployment/analytics-platform -n dev
+  environment:
+    name: development
+    kubernetes:
+      namespace: dev
+  only:
+    - develop
+
+deploy_staging:
+  stage: deploy-staging
+  image: alpine/k8s:latest
+  script:
+    - kubectl config use-context local-cluster
+    - kubectl set image deployment/analytics-platform -n staging analytics=$REGISTRY/$IMAGE_NAME:$CI_COMMIT_SHA --record
+    - kubectl rollout status deployment/analytics-platform -n staging
+  environment:
+    name: staging
+    kubernetes:
+      namespace: staging
+  only:
+    - main
+  when: manual
+
+deploy_prod:
+  stage: deploy-prod
+  image: alpine/k8s:latest
+  script:
+    - kubectl config use-context cloud-cluster
+    - kubectl set image deployment/analytics-platform -n production analytics=$REGISTRY/$IMAGE_NAME:$CI_COMMIT_SHA --record
+    - kubectl rollout status deployment/analytics-platform -n production
+  environment:
+    name: production
+    kubernetes:
+      namespace: production
+  only:
+    - main
+  when: manual

@@ -1,0 +1,17 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: eshop
+  labels:
+    app.kubernetes.io/name: eshop
+    app.kubernetes.io/part-of: cloudopshub
+---
+# Service Account for eShop application
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: eshop
+  namespace: eshop
+  labels:
+    app.kubernetes.io/name: eshop

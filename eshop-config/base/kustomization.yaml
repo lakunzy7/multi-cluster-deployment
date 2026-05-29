@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: eshop
+
+commonLabels:
+  app.kubernetes.io/part-of: cloudopshub
+  app.kubernetes.io/managed-by: argocd
+
+resources:
+  - eshop-namespace.yml
+  - eshop-config.yml
+  - eshop-secrets.yml
+  - eshop-redis.yml
+  - eshop-cloudsql-proxy.yml
+  - eshop-catalog-api.yml
+  - eshop-basket-api.yml
+  - eshop-order-api.yml
+  - eshop-web.yml
+  - eshop-ingress.yml
+
+images:
+  - name: docker.io/dotnet/eshop
+    newTag: latest

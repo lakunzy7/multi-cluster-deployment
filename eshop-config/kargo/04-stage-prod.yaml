@@ -1,0 +1,54 @@
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: prod
+  namespace: eshop
+spec:
+  requestedFreight:
+    - origin:
+        kind: Warehouse
+        name: eshop
+      sources:
+        stages:
+          - staging
+  promotionTemplate:
+    spec:
+      vars:
+        - name: gitRepo
+          value: https://github.com/CHANGE-ME/multi-cluster-deployment.git
+        - name: gitBranch
+          value: main
+        - name: imageRepo
+          value: docker.io/dotnet/eshop
+        - name: overlayPath
+          value: eshop-config/overlays/prod
+      steps:
+        - uses: git-clone
+          config:
+            repoURL: ${{ vars.gitRepo }}
+            checkout:
+              - branch: ${{ vars.gitBranch }}
+                path: ./repo
+        - uses: kustomize-set-image
+          as: update-image
+          config:
+            path: ./repo/${{ vars.overlayPath }}
+            images:
+              - image: ${{ vars.imageRepo }}
+                tag: ${{ imageFrom(vars.imageRepo).Tag }}
+        - uses: git-commit
+          as: commit
+          config:
+            path: ./repo
+            message: "kargo: promote ${{ vars.imageRepo }} to prod"
+        - uses: git-push
+          config:
+            path: ./repo
+        - uses: argocd-update
+          config:
+            apps:
+              - name: eshop-prod
+                sources:
+                  - repoURL: ${{ vars.gitRepo }}
+                    desiredCommitFromStep: commit

@@ -1,0 +1,146 @@
+---
+# Network policies for eShop services
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: eshop-allow-web-ingress
+  namespace: eshop
+spec:
+  podSelector:
+    matchLabels:
+      app: eshop-web
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 8443
+---
+# Allow API-to-API communication
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: eshop-allow-api-communication
+  namespace: eshop
+spec:
+  podSelector:
+    matchLabels:
+      app: eshop-web
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: eshop-catalog-api
+    ports:
+    - protocol: TCP
+      port: 8080
+  - to:
+    - podSelector:
+        matchLabels:
+          app: eshop-basket-api
+    ports:
+    - protocol: TCP
+      port: 8080
+  - to:
+    - podSelector:
+        matchLabels:
+          app: eshop-order-api
+    ports:
+    - protocol: TCP
+      port: 8080
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+---
+# Ingress for eShop web
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: eshop-ingress
+  namespace: eshop
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+spec:
+  tls:
+  - hosts:
+    - eshop.example.com
+    - www.eshop.example.com
+    secretName: eshop-tls
+  rules:
+  - host: eshop.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: eshop-web
+            port:
+              number: 80
+  - host: www.eshop.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: eshop-web
+            port:
+              number: 80
+---
+# API Ingress for direct API access
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: eshop-api-ingress
+  namespace: eshop
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  tls:
+  - hosts:
+    - api.eshop.example.com
+    secretName: eshop-api-tls
+  rules:
+  - host: api.eshop.example.com
+    http:
+      paths:
+      - path: /catalog
+        pathType: Prefix
+        backend:
+          service:
+            name: catalog-api
+            port:
+              number: 8080
+      - path: /basket
+        pathType: Prefix
+        backend:
+          service:
+            name: basket-api
+            port:
+              number: 8080
+      - path: /order
+        pathType: Prefix
+        backend:
+          service:
+            name: order-api
+            port:
+              number: 8080

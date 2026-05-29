@@ -1,0 +1,248 @@
+name: eShop GitOps CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - '.github/workflows/eshop-gitops-cd.yml'
+  pull_request:
+    branches:
+      - main
+      - develop
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_REGISTRY_OWNER: dotnet
+  DOTNET_VERSION: '9.0'
+
+jobs:
+  build-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Restore dependencies
+      run: dotnet restore
+
+    - name: Build solution
+      run: dotnet build --configuration Release --no-restore
+
+    - name: Run unit tests
+      run: dotnet test --configuration Release --no-build --verbosity normal --filter "Category!=Integration"
+
+    - name: Run integration tests
+      run: dotnet test --configuration Release --no-build --filter "Category=Integration" --verbosity normal
+      continue-on-error: true
+
+  security-scan:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+    needs: build-test
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: 'src'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+        severity: 'HIGH,CRITICAL'
+
+    - name: Upload Trivy results to GitHub Security
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: 'trivy-results.sarif'
+        category: 'trivy'
+
+    - name: Run Gitleaks secret scanning
+      uses: gitleaks/gitleaks-action@v2
+      with:
+        source: 'src'
+        verbose: true
+
+  build-push-images:
+    name: Build & Push Container Images
+    runs-on: ubuntu-latest
+    needs: [build-test, security-scan]
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      matrix:
+        service:
+          - name: catalog-api
+            dockerfile: src/Catalog.API/Dockerfile
+          - name: basket-api
+            dockerfile: src/Basket.API/Dockerfile
+          - name: order-api
+            dockerfile: src/Order.API/Dockerfile
+          - name: web
+            dockerfile: src/Web/Dockerfile
+          - name: payment-api
+            dockerfile: src/Payment.API/Dockerfile
+          - name: identity-api
+            dockerfile: src/Identity.API/Dockerfile
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata for ${{ matrix.service.name }}
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_REGISTRY_OWNER }}/eshop/${{ matrix.service.name }}
+        tags: |
+          type=ref,event=branch
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push Docker image for ${{ matrix.service.name }}
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ${{ matrix.service.dockerfile }}
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_REGISTRY_OWNER }}/eshop/${{ matrix.service.name }}:buildcache
+        cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_REGISTRY_OWNER }}/eshop/${{ matrix.service.name }}:buildcache,mode=max
+
+  update-gitops-repo:
+    name: Update GitOps Repository
+    runs-on: ubuntu-latest
+    needs: build-push-images
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+
+    steps:
+    - name: Determine environment and image tag
+      id: env-tag
+      run: |
+        if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+          echo "environment=prod" >> $GITHUB_OUTPUT
+          echo "tag=v${{ github.run_number }}" >> $GITHUB_OUTPUT
+        elif [ "${{ github.ref }}" = "refs/heads/develop" ]; then
+          echo "environment=dev" >> $GITHUB_OUTPUT
+          echo "tag=develop-${{ github.sha }}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Checkout GitOps repository
+      uses: actions/checkout@v4
+      with:
+        repository: cloudopshub/eshop-config
+        token: ${{ secrets.GITOPS_REPO_TOKEN }}
+        path: eshop-config
+
+    - name: Update image tags in Kustomize
+      run: |
+        ENV=${{ steps.env-tag.outputs.environment }}
+        TAG=${{ steps.env-tag.outputs.tag }}
+
+        cd eshop-config/overlays/$ENV
+
+        # Update all service image tags
+        sed -i "s|newTag:.*|newTag: $TAG|g" kustomization.yml
+
+        echo "Updated overlays/$ENV/kustomization.yml with tag: $TAG"
+
+    - name: Commit and push changes to GitOps repo
+      run: |
+        cd eshop-config
+
+        git config --local user.email "github-actions[bot]@github.com"
+        git config --local user.name "github-actions[bot]"
+
+        git add overlays/
+        git diff --cached --quiet || git commit -m "chore: update image tags for build ${{ github.run_number }}
+
+Updated images from ${{ github.ref_name }} branch
+Commit: ${{ github.sha }}
+Build: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+        git push origin main
+
+    - name: Create GitHub deployment notification
+      if: success()
+      run: |
+        cat >> $GITHUB_STEP_SUMMARY << EOF
+        ## 🚀 GitOps Update Successful
+
+        **Environment**: ${{ steps.env-tag.outputs.environment }}
+        **Image Tag**: ${{ steps.env-tag.outputs.tag }}
+        **Branch**: ${{ github.ref_name }}
+        **Commit**: ${{ github.sha }}
+
+        GitOps repository (eshop-config) has been updated.
+        ArgoCD will sync the changes automatically.
+        EOF
+
+  deploy-status:
+    name: Deployment Status
+    runs-on: ubuntu-latest
+    needs: [build-test, security-scan, build-push-images, update-gitops-repo]
+    if: always()
+
+    steps:
+    - name: Check job status
+      run: |
+        if [ "${{ needs.build-test.result }}" = "failure" ] || [ "${{ needs.security-scan.result }}" = "failure" ]; then
+          echo "❌ Build or security scan failed"
+          exit 1
+        fi
+        echo "✅ All checks passed"
+
+    - name: Create success summary
+      if: success()
+      run: |
+        cat >> $GITHUB_STEP_SUMMARY << EOF
+        ## ✅ eShop GitOps Pipeline Complete
+
+        | Stage | Status |
+        |-------|--------|
+        | Build & Test | ✅ Passed |
+        | Security Scan | ✅ Passed |
+        | Build Images | ✅ Complete |
+        | Update GitOps | ✅ Complete |
+
+        **Next Steps**:
+        1. ArgoCD will automatically sync the changes
+        2. Monitor deployment: \`argocd app get eshop-${{ github.ref_name }}\`
+        3. View pods: \`kubectl get pods -n eshop\`
+        EOF

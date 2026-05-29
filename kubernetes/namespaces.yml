@@ -1,0 +1,54 @@
+---
+# Application namespaces
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev
+  labels:
+    environment: development
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: staging
+  labels:
+    environment: staging
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: production
+  labels:
+    environment: production
+---
+# Monitoring namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    app: prometheus
+---
+# Logging namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: logging
+  labels:
+    app: elasticsearch
+---
+# Security namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: security
+  labels:
+    app: security
+---
+# CI/CD namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ci-cd
+  labels:
+    app: argocd

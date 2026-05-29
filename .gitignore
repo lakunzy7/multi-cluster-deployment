@@ -1,0 +1,22 @@
+# eShop is its own clone (cloudopshub/k8s-integration branch) — tracked separately
+eShop/
+
+# Local Kargo admin credentials
+.kargo-secrets/
+
+# Local kubeconfig overrides
+*.kubeconfig
+kubeconfig-*
+
+# Terraform local state (if any)
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.backup
+terraform/.terraform.lock.hcl
+terraform/crash.log
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/

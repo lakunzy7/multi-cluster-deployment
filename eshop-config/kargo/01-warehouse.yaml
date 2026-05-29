@@ -1,0 +1,12 @@
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Warehouse
+metadata:
+  name: eshop
+  namespace: eshop
+spec:
+  subscriptions:
+    - image:
+        repoURL: docker.io/dotnet/eshop
+        imageSelectionStrategy: SemVer
+        semverConstraint: ">=0.1.0"

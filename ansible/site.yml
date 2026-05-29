@@ -1,0 +1,35 @@
+---
+- name: Configure Kubernetes clusters
+  hosts: all
+  become: yes
+  roles:
+    - common
+    - security
+    - container_runtime
+    - kubernetes
+    - monitoring_agent
+
+- name: Configure control plane nodes
+  hosts: control_plane
+  become: yes
+  roles:
+    - kube_control_plane
+    - cni_setup
+    - storage_setup
+
+- name: Configure worker nodes
+  hosts: workers
+  become: yes
+  roles:
+    - kube_worker
+
+- name: Post-cluster setup
+  hosts: localhost
+  gather_facts: no
+  tasks:
+    - name: Install cluster addons
+      include_role:
+        name: cluster_addons
+    - name: Configure ArgoCD
+      include_role:
+        name: argocd_setup

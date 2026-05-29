@@ -1,0 +1,46 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: eshop-prod
+nameSuffix: -prod
+
+resources:
+  - ../../base
+
+commonLabels:
+  environment: prod
+
+images:
+  - name: docker.io/dotnet/eshop
+    newTag: prod-latest
+
+replicas:
+  - name: catalog-api
+    count: 3
+  - name: basket-api
+    count: 3
+  - name: order-api
+    count: 3
+  - name: eshop-web
+    count: 3
+
+patches:
+  - target:
+      kind: ConfigMap
+      name: eshop-config
+    patch: |-
+      - op: replace
+        path: /data/ASPNETCORE_ENVIRONMENT
+        value: Production
+      - op: replace
+        path: /data/SERILOG_MINIMUM_LOG_LEVEL
+        value: Warning
+  - target:
+      kind: HorizontalPodAutoscaler
+    patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 3
+      - op: replace
+        path: /spec/maxReplicas
+        value: 10

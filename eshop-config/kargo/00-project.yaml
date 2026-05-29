@@ -1,0 +1,19 @@
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Project
+metadata:
+  name: eshop
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: ProjectConfig
+metadata:
+  name: eshop
+  namespace: eshop
+spec:
+  promotionPolicies:
+    - stage: dev
+      autoPromotionEnabled: true
+    - stage: staging
+      autoPromotionEnabled: true
+    - stage: prod
+      autoPromotionEnabled: false
