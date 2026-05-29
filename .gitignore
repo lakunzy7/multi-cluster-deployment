@@ -20,3 +20,5 @@ terraform/crash.log
 *.swp
 .idea/
 .vscode/
+terraform/tfplan
+terraform/.terraform.lock.hcl
