@@ -84,7 +84,8 @@ resource "google_container_cluster" "cloud" {
   remove_default_node_pool = true
   initial_node_count       = 1
 
-  network = google_compute_network.main.name
+  network    = google_compute_network.main.name
+  subnetwork = google_compute_subnetwork.cluster[0].name
 
   network_policy {
     enabled = true

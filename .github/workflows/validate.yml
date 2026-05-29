@@ -1,0 +1,110 @@
+name: Validate manifests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  kustomize:
+    name: Kustomize build all overlays
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kustomize
+        run: |
+          curl -sLo kustomize.tar.gz https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz
+          tar -xzf kustomize.tar.gz
+          sudo mv kustomize /usr/local/bin/
+
+      - name: Build dev overlay
+        run: kustomize build eshop-config/overlays/dev > /tmp/dev.yaml
+
+      - name: Build staging overlay
+        run: kustomize build eshop-config/overlays/staging > /tmp/staging.yaml
+
+      - name: Build prod overlay
+        run: kustomize build eshop-config/overlays/prod > /tmp/prod.yaml
+
+      - name: Summarize generated resources
+        run: |
+          for env in dev staging prod; do
+            count=$(grep -c '^kind:' /tmp/$env.yaml || true)
+            echo "$env: $count resources"
+          done
+
+  kubeconform:
+    name: Validate k8s schemas
+    runs-on: ubuntu-latest
+    needs: kustomize
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kustomize + kubeconform
+        run: |
+          curl -sLo kustomize.tar.gz https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz
+          tar -xzf kustomize.tar.gz && sudo mv kustomize /usr/local/bin/
+          curl -sL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz | tar xz
+          sudo mv kubeconform /usr/local/bin/
+
+      - name: Validate all overlays against k8s 1.31 schemas
+        run: |
+          set -e
+          for env in dev staging prod; do
+            echo "=== validating $env ==="
+            kustomize build eshop-config/overlays/$env \
+              | kubeconform -strict -ignore-missing-schemas -kubernetes-version 1.31.0 -summary
+          done
+
+  yaml-lint:
+    name: YAML lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run yamllint
+        uses: ibiqlik/action-yamllint@v3
+        with:
+          file_or_dir: |
+            eshop-config/
+            kubernetes/
+          config_data: |
+            extends: default
+            rules:
+              line-length: disable
+              document-start: disable
+              truthy: { check-keys: false }
+              comments: { min-spaces-from-content: 1 }
+
+  terraform-validate:
+    name: Terraform validate + fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.0
+      - name: terraform fmt check
+        run: terraform -chdir=terraform fmt -check -diff
+        continue-on-error: true
+      - name: terraform init (no backend)
+        run: terraform -chdir=terraform init -backend=false
+      - name: terraform validate
+        run: terraform -chdir=terraform validate
+
+  kargo-render:
+    name: Validate Kargo manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: yaml syntax check on Kargo files
+        run: |
+          for f in eshop-config/kargo/*.yaml; do
+            python3 -c "import yaml,sys; list(yaml.safe_load_all(open('$f')))" \
+              && echo "ok: $f"
+          done
