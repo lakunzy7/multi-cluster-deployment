@@ -1,0 +1,37 @@
+---
+# eShop prod — MANUAL sync, lives on the GKE cloud-cluster.
+# Auto-sync is intentionally OFF so promotions to prod require explicit approval
+# (matches the Kargo gating: dev=auto, staging=auto, prod=manual).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: eshop-prod
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: eshop
+  source:
+    repoURL: https://github.com/lakunzy7/multi-cluster-deployment.git
+    targetRevision: main
+    path: eshop-config/overlays/prod
+  destination:
+    name: gke-cloud-cluster
+    namespace: eshop-prod
+  # No syncPolicy.automated → sync only when triggered manually
+  # (UI button, `argocd app sync eshop-prod`, or kargo promote)
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 5m
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas

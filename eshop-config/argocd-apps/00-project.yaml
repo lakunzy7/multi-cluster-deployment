@@ -1,0 +1,33 @@
+---
+# AppProject scoping all eShop Applications to:
+#   - this repo only
+#   - the in-cluster (Kind) + gke-cloud-cluster destinations only
+#   - eshop-{dev,staging,prod} namespaces only
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: eshop
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: eShop application across dev/staging/prod environments
+  sourceRepos:
+    - https://github.com/lakunzy7/multi-cluster-deployment.git
+  destinations:
+    - name: in-cluster
+      namespace: eshop-dev
+    - name: in-cluster
+      namespace: eshop-staging
+    - name: gke-cloud-cluster
+      namespace: eshop-prod
+  clusterResourceWhitelist:
+    - group: ''
+      kind: Namespace
+    - group: storage.k8s.io
+      kind: StorageClass
+  namespaceResourceWhitelist:
+    - group: '*'
+      kind: '*'
+  orphanedResources:
+    warn: true
