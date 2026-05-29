@@ -4,6 +4,9 @@ eShop/
 # Local Kargo admin credentials
 .kargo-secrets/
 
+# ArgoCD cluster Secret with rendered bearer token (regenerate per env)
+eshop-config/argocd-clusters/gke-cluster-secret.yaml
+
 # Local kubeconfig overrides
 *.kubeconfig
 kubeconfig-*
