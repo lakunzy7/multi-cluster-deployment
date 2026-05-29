@@ -20,8 +20,8 @@ output "cloud_cluster_location" {
 }
 
 output "gke_kubeconfig_command" {
-  description = "Command to configure kubectl for GKE cluster"
-  value       = "gcloud container clusters get-credentials ${google_container_cluster.cloud.name} --region ${google_container_cluster.cloud.location} --project ${var.gcp_project}"
+  description = "Command to configure kubectl for the zonal GKE cluster"
+  value       = "gcloud container clusters get-credentials ${google_container_cluster.cloud.name} --zone ${google_container_cluster.cloud.location} --project ${var.gcp_project}"
 }
 
 output "vpc_network" {

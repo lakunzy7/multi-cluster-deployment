@@ -1,36 +1,11 @@
-terraform {
-  required_version = ">= 1.0"
-  required_providers {
-    google = {
-      source  = "hashicorp/google"
-      version = "~> 5.0"
-    }
-    kubernetes = {
-      source  = "hashicorp/kubernetes"
-      version = "~> 2.23"
-    }
-    helm = {
-      source  = "hashicorp/helm"
-      version = "~> 2.11"
-    }
-  }
-
-  backend "local" {
-    path = "terraform.tfstate"
-  }
-}
-
-provider "google" {
-  project = var.gcp_project
-  region  = var.gcp_region
-}
-
-# Data source for current GCP project
-data "google_client_config" "default" {}
-data "google_compute_zones" "available" {
-  project = var.gcp_project
-  region  = var.gcp_region
-}
+# Terraform settings, providers, and backend live in backend.tf + providers.tf.
+# This file holds the actual GCP infrastructure: VPC, GKE (zonal + Spot), GCS buckets.
+#
+# Lab/free-tier optimizations:
+#   - GKE is ZONAL (location = var.gcp_zone) -> qualifies for the monthly free-tier
+#     control-plane credit (~$73/mo saved vs regional)
+#   - Default node pool removed; custom pool uses Spot e2-medium ×2 (~$22/mo)
+#   - No Cloud SQL: Postgres will run as an in-cluster StatefulSet
 
 # VPC and Networking for Cloud Cluster
 resource "google_compute_network" "main" {
@@ -99,23 +74,58 @@ resource "google_project_service" "storage" {
   disable_on_destroy = false
 }
 
-resource "google_project_service" "sql" {
-  service            = "sqladmin.googleapis.com"
-  disable_on_destroy = false
-}
-
-# GKE Cluster (Cloud Cluster)
+# GKE Cluster (Cloud Cluster) — ZONAL for free-tier credit
 resource "google_container_cluster" "cloud" {
   name     = var.cloud_cluster_name
-  location = var.gcp_region
+  location = var.gcp_zone
 
-  initial_node_count = var.node_count
-  network            = google_compute_network.main.name
+  # Best practice: create the cluster with a tiny default pool, then replace it
+  # with a custom Spot node pool defined below.
+  remove_default_node_pool = true
+  initial_node_count       = 1
+
+  network = google_compute_network.main.name
+
+  network_policy {
+    enabled = true
+  }
+
+  addons_config {
+    http_load_balancing {
+      disabled = false
+    }
+    horizontal_pod_autoscaling {
+      disabled = false
+    }
+  }
+
+  master_auth {
+    client_certificate_config {
+      issue_client_certificate = false
+    }
+  }
+
+  depends_on = [
+    google_project_service.container,
+    google_compute_network.main
+  ]
+}
+
+# Custom node pool: 2 × e2-medium Spot nodes, no autoscaling
+resource "google_container_node_pool" "cloud_pool" {
+  name       = "${var.cloud_cluster_name}-pool"
+  cluster    = google_container_cluster.cloud.name
+  location   = var.gcp_zone
+  node_count = var.node_count
 
   node_config {
     machine_type = var.instance_type
-    disk_size_gb = 100
+    disk_size_gb = 50
     disk_type    = "pd-standard"
+
+    # Slash compute cost (~60-90% vs on-demand). Spot nodes can be preempted
+    # at any time; that's fine for a lab. Workloads should tolerate restarts.
+    spot = true
 
     oauth_scopes = [
       "https://www.googleapis.com/auth/cloud-platform"
@@ -129,78 +139,16 @@ resource "google_container_cluster" "cloud" {
       enable_secure_boot          = true
       enable_integrity_monitoring = true
     }
-  }
-
-  # Network configuration
-  network_policy {
-    enabled = true
-  }
-
-  # Cluster features
-  addons_config {
-    http_load_balancing {
-      disabled = false
-    }
-    horizontal_pod_autoscaling {
-      disabled = false
-    }
-  }
-
-  # Cluster autoscaling
-  cluster_autoscaling {
-    enabled = true
-    resource_limits {
-      resource_type = "cpu"
-      minimum       = 1
-      maximum       = 10
-    }
-    resource_limits {
-      resource_type = "memory"
-      minimum       = 1
-      maximum       = 64
-    }
-  }
-
-  # Security
-  master_auth {
-    client_certificate_config {
-      issue_client_certificate = false
-    }
-  }
-
-  depends_on = [
-    google_project_service.container,
-    google_compute_network.main
-  ]
-}
-
-# Node pool for additional autoscaling
-resource "google_container_node_pool" "cloud_pool" {
-  name           = "${var.cloud_cluster_name}-pool"
-  cluster        = google_container_cluster.cloud.name
-  location       = var.gcp_region
-  initial_node_count = var.node_count
-
-  autoscaling {
-    min_node_count = var.node_count - 1
-    max_node_count = var.node_count + 2
-  }
-
-  node_config {
-    machine_type = var.instance_type
-    disk_size_gb = 100
-
-    oauth_scopes = [
-      "https://www.googleapis.com/auth/cloud-platform"
-    ]
 
     labels = {
       "cluster" = var.cloud_cluster_name
+      "tier"    = "spot"
     }
   }
 }
 
-# GCS bucket for backups
+# GCS bucket for backups (still useful even without Cloud SQL — for app data,
+# k8s manifests, velero snapshots, etc.)
 resource "google_storage_bucket" "backups" {
   name          = "${var.project_name}-backups-${data.google_client_config.default.project}"
   location      = var.gcp_region

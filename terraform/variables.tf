@@ -15,6 +15,12 @@ variable "gcp_region" {
   default     = "europe-west1"
 }
 
+variable "gcp_zone" {
+  description = "GCP zone for the zonal GKE cluster (lab/free-tier optimization)"
+  type        = string
+  default     = "europe-west1-b"
+}
+
 variable "environment" {
   description = "Environment name (dev, staging, prod)"
   type        = string
@@ -40,9 +46,9 @@ variable "kubernetes_version" {
 }
 
 variable "node_count" {
-  description = "Number of worker nodes per cluster"
+  description = "Number of worker nodes in the GKE Spot node pool"
   type        = number
-  default     = 3
+  default     = 2
 }
 
 variable "instance_type" {
