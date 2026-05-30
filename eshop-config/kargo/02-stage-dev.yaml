@@ -44,10 +44,17 @@ spec:
         - uses: git-push
           config:
             path: ./repo
+        # Sync BOTH regional ApplicationSet-generated Applications.
+        # Each argocd-update step blocks until the App is Synced AND Healthy,
+        # so the promotion only succeeds when every region is healthy.
         - uses: argocd-update
           config:
             apps:
-              - name: eshop-dev
+              - name: eshop-dev-local
+                sources:
+                  - repoURL: ${{ vars.gitRepo }}
+                    desiredCommitFromStep: commit
+              - name: eshop-dev-europe-west1
                 sources:
                   - repoURL: ${{ vars.gitRepo }}
                     desiredCommitFromStep: commit

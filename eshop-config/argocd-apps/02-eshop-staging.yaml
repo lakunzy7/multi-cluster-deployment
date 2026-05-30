@@ -27,10 +27,9 @@ spec:
       destination:
         name: '{{name}}'
         namespace: eshop-staging
+      # Manual sync per region. Kargo's argocd-update step triggers the sync
+      # during a promotion (and waits for Healthy).
       syncPolicy:
-        automated:
-          prune: true
-          selfHeal: true
         syncOptions:
           - CreateNamespace=true
           - ServerSideApply=true

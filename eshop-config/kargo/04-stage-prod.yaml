@@ -45,10 +45,15 @@ spec:
         - uses: git-push
           config:
             path: ./repo
+        # Sync BOTH regional ApplicationSet-generated Applications.
         - uses: argocd-update
           config:
             apps:
-              - name: eshop-prod
+              - name: eshop-prod-local
+                sources:
+                  - repoURL: ${{ vars.gitRepo }}
+                    desiredCommitFromStep: commit
+              - name: eshop-prod-europe-west1
                 sources:
                   - repoURL: ${{ vars.gitRepo }}
                     desiredCommitFromStep: commit

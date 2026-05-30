@@ -27,10 +27,10 @@ spec:
       destination:
         name: '{{name}}'
         namespace: eshop-dev
+      # Manual sync per region. Kargo's argocd-update step triggers the sync
+      # during a promotion (and waits for Healthy). Direct git edits do NOT
+      # auto-deploy — promotions are the only path to rollout.
       syncPolicy:
-        automated:
-          prune: true
-          selfHeal: true
         syncOptions:
           - CreateNamespace=true
           - ServerSideApply=true

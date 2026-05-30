@@ -1,16 +1,18 @@
-# ArgoCD ApplicationSets for eShop (multi-cluster fan-out)
+# ArgoCD ApplicationSets for eShop (multi-cluster fan-out, manual sync)
 
-Three `ApplicationSet`s + one `AppProject`. Each ApplicationSet uses a **cluster generator** that matches every cluster labeled `env: multi`, producing one `Application` per (environment, region) pair.
+Three `ApplicationSet`s + one `AppProject`. Each ApplicationSet uses a **cluster generator** matching every cluster labeled `env: multi`, producing one `Application` per (environment, region) pair.
 
 Currently 6 generated Applications (2 clusters × 3 envs). Add a new cluster with `env=multi` and 3 more Applications appear automatically.
+
+**Sync policy is manual on all 6.** Rollouts happen only when Kargo runs an `argocd-update` step during a promotion. Direct git edits do not trigger deploys.
 
 ## Files
 
 | File | What it creates |
 |---|---|
 | `00-project.yaml` | `AppProject eshop` — repo allowlist + name-wildcard destinations (any cluster, the 3 eshop-* namespaces) |
-| `01-eshop-dev.yaml` | `ApplicationSet eshop-dev` → `eshop-dev-<region>` Apps, auto-sync |
-| `02-eshop-staging.yaml` | `ApplicationSet eshop-staging` → `eshop-staging-<region>` Apps, auto-sync |
+| `01-eshop-dev.yaml` | `ApplicationSet eshop-dev` → `eshop-dev-<region>` Apps, manual sync |
+| `02-eshop-staging.yaml` | `ApplicationSet eshop-staging` → `eshop-staging-<region>` Apps, manual sync |
 | `03-eshop-prod.yaml` | `ApplicationSet eshop-prod` → `eshop-prod-<region>` Apps, manual sync |
 
 ## Topology
@@ -59,19 +61,15 @@ Cluster Secrets must carry that label. Currently labeled:
 
 To add a new region, register the cluster (see `../argocd-clusters/HOW-TO-ADD-CLUSTER.md`) with labels `env=multi, region=<name>`. The ApplicationSets fan out to it automatically — no edits here.
 
-## Sync policy alignment with Kargo
+## Sync policy
 
 | Stage | Kargo `autoPromotionEnabled` | ApplicationSet `automated` |
 |---|---|---|
-| dev | true | yes |
-| staging | true | yes |
-| prod | **false** | **no** (manual per region) |
+| dev | false | **no** |
+| staging | false | **no** |
+| prod | false | **no** |
 
-Prod requires:
-1. Kargo promotion (commits the new image tag to `overlays/prod/`)
-2. Manual `argocd app sync eshop-prod-local` **and** `argocd app sync eshop-prod-europe-west1`
-
-Two gates per region — deliberate.
+Promotions are the only way to roll out a new image. The `argocd-update` step inside each Kargo Stage's promotionTemplate (a) syncs both regional Apps and (b) blocks until both report Healthy. See `../kargo/README.md` for the full flow.
 
 ## Bootstrap
 
@@ -89,36 +87,31 @@ kubectl -n argocd get applications
 argocd app list
 ```
 
-Expected output (6 Apps):
+Expected output (6 Apps, all "Manual"):
 
 ```
-eshop-dev-local             in-cluster         eshop-dev      Auto-Prune
-eshop-dev-europe-west1      gke-cloud-cluster  eshop-dev      Auto-Prune
-eshop-staging-local         in-cluster         eshop-staging  Auto-Prune
-eshop-staging-europe-west1  gke-cloud-cluster  eshop-staging  Auto-Prune
+eshop-dev-local             in-cluster         eshop-dev      Manual
+eshop-dev-europe-west1      gke-cloud-cluster  eshop-dev      Manual
+eshop-staging-local         in-cluster         eshop-staging  Manual
+eshop-staging-europe-west1  gke-cloud-cluster  eshop-staging  Manual
 eshop-prod-local            in-cluster         eshop-prod     Manual
 eshop-prod-europe-west1     gke-cloud-cluster  eshop-prod     Manual
 ```
 
-## Manual prod rollout
+## Out-of-band sync (debugging only)
+
+If you need to force-sync without going through Kargo (e.g. while developing a manifest):
 
 ```bash
-# Roll out to one region at a time (canary-style)
-argocd app sync eshop-prod-europe-west1
-argocd app wait eshop-prod-europe-west1 --health
-# Then the other region
-argocd app sync eshop-prod-local
-
-# OR: roll out everywhere at once
-argocd app sync -l app.kubernetes.io/instance=eshop-prod
+argocd app sync eshop-dev-local --prune
 ```
+
+Don't make a habit of it — it bypasses the freight gate and Kargo's view of stage state will diverge from reality.
 
 ## Removing a region
 
-Delete the cluster Secret (or remove the `env=multi` label) and ArgoCD will prune that region's generated Applications:
+Delete the cluster Secret (or remove the `env=multi` label) and ArgoCD prunes that region's generated Applications:
 
 ```bash
 kubectl -n argocd label secret gke-cloud-cluster env-
 ```
-
-The ApplicationSet controller detects the cluster no longer matches and deletes the corresponding Applications. Workloads in the removed region are torn down (because `prune: true` on dev/staging) — for prod, you'd want to disable pruning first.
