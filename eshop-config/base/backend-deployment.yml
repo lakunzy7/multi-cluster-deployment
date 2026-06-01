@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  labels:
+    app: backend
+    component: api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+        component: api
+    spec:
+      serviceAccountName: eshop
+      containers:
+      - name: backend
+        image: backend:latest
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 5000
+          protocol: TCP
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 30
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+      imagePullSecrets:
+      - name: ghcr-pull-secret

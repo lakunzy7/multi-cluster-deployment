@@ -1,67 +1,10 @@
 ---
-# ConfigMap for eShop shared configuration
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: eshop-config
   namespace: eshop
 data:
-  # Aspire Configuration
-  ASPIRE_LOGGING_CONSOLE_ENABLED: "true"
-  ASPIRE_DASHBOARD_ENABLED: "false"
-
-  # Service URLs (configured per environment)
-  CATALOG_API_HOST: "catalog-api.eshop.svc.cluster.local"
-  CATALOG_API_PORT: "8080"
-
-  BASKET_API_HOST: "basket-api.eshop.svc.cluster.local"
-  BASKET_API_PORT: "8080"
-
-  ORDER_API_HOST: "order-api.eshop.svc.cluster.local"
-  ORDER_API_PORT: "8080"
-
-  PAYMENT_API_HOST: "payment-api.eshop.svc.cluster.local"
-  PAYMENT_API_PORT: "8080"
-
-  # Database Configuration
-  DATABASE_HOST: "cloudsql-proxy.eshop.svc.cluster.local"
-  DATABASE_PORT: "5432"
-  DATABASE_NAME: "eshop"
-
-  # Cache Configuration
-  REDIS_HOST: "redis.eshop.svc.cluster.local"
-  REDIS_PORT: "6379"
-
-  # Logging
-  SERILOG_MINIMUM_LOG_LEVEL: "Information"
-
-  # ASP.NET Core
-  ASPNETCORE_ENVIRONMENT: "Production"
----
-# ConfigMap for environment-specific settings
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: eshop-env-dev
-  namespace: eshop
-data:
-  ENVIRONMENT: "development"
-  LOG_LEVEL: "Debug"
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: eshop-env-staging
-  namespace: eshop
-data:
-  ENVIRONMENT: "staging"
-  LOG_LEVEL: "Information"
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: eshop-env-prod
-  namespace: eshop
-data:
-  ENVIRONMENT: "production"
-  LOG_LEVEL: "Warning"
+  ASPNETCORE_ENVIRONMENT: Production
+  SERILOG_MINIMUM_LOG_LEVEL: Information
+  PODINFO_UI_MESSAGE: "hello from cloudopshub"

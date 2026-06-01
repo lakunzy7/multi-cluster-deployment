@@ -11,7 +11,7 @@ kubernetes_version    = "1.28"
 
 # Node Configuration (Spot pool)
 node_count    = 2
-instance_type = "e2-medium"
+instance_type = "e2-standard-2"
 
 # Zonal GKE for free-tier control-plane credit
 gcp_zone      = "europe-west1-b"

@@ -7,6 +7,8 @@ metadata:
 spec:
   subscriptions:
     - image:
-        repoURL: docker.io/dotnet/eshop
-        imageSelectionStrategy: SemVer
-        semverConstraint: ">=0.1.0"
+        repoURL: ghcr.io/lakunzy7/authenticwrite/backend
+        imageSelectionStrategy: NewestBuild
+    - image:
+        repoURL: ghcr.io/lakunzy7/authenticwrite/frontend
+        imageSelectionStrategy: NewestBuild

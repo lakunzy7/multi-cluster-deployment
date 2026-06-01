@@ -10,15 +10,14 @@ commonLabels:
 resources:
   - eshop-namespace.yml
   - eshop-config.yml
-  - eshop-secrets.yml
-  - eshop-redis.yml
-  - eshop-cloudsql-proxy.yml
-  - eshop-catalog-api.yml
-  - eshop-basket-api.yml
-  - eshop-order-api.yml
-  - eshop-web.yml
-  - eshop-ingress.yml
+  - backend-deployment.yml
+  - backend-service.yml
+  - frontend-deployment.yml
+  - frontend-service.yml
+  - ingress.yml
 
 images:
-  - name: docker.io/dotnet/eshop
+  - name: backend
+    newTag: latest
+  - name: frontend
     newTag: latest

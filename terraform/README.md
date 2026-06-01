@@ -6,7 +6,7 @@ Provisions a minimal, low-cost GCP footprint for the cloud half of the multi-clu
 
 - **VPC** + 2 subnets + 2 firewall rules
 - **GKE zonal cluster** in `europe-west1-b` (qualifies for the monthly free-tier control-plane credit)
-- **Custom Spot node pool**: 2 × `e2-medium`, 50 GB pd-standard
+- **Custom Spot node pool**: 2 × `e2-standard-2`, 50 GB pd-standard
 - **3 × GCS buckets**: backups + 2 cluster log buckets
 - **3 × API enablements**: compute, container, storage
 
@@ -87,13 +87,13 @@ gcloud container clusters resize cloud-cluster --zone europe-west1-b --num-nodes
 | Component | Spec | Monthly |
 |---|---|---:|
 | GKE zonal control plane | Free-tier credit applies | **$0** |
-| Node pool | 2 × e2-medium **Spot** | ~$22 |
+| Node pool | 2 × e2-standard-2 **Spot** | ~$30 |
 | PD-standard disks | 2 × 50 GB | ~$4 |
 | GCS buckets | Standard, ~empty | ~$0.20 |
 | Egress | ~10 GB/mo | ~$1.20 |
-| **Total** | | **~$27/mo** |
+| **Total** | | **~$35/mo** |
 
-Compared to the original regional+on-demand+CloudSQL design (~$160/mo), this saves ~$133/mo (83%).
+Compared to the original regional+on-demand+CloudSQL design (~$160/mo), this saves ~$125/mo (78%).
 
 ## Spot caveats
 
