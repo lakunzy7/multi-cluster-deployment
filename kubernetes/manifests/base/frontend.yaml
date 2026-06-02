@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: authenticwrite
+  labels:
+    app: authenticwrite
+    component: frontend
+spec:
+  replicas: 1  # overridden by overlays
+  selector:
+    matchLabels:
+      app: authenticwrite
+      component: frontend
+  template:
+    metadata:
+      labels:
+        app: authenticwrite
+        component: frontend
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull-secret  # created by secrets task
+      containers:
+        - name: frontend
+          image: ghcr.io/lakunzy7/authenticwrite/frontend:latest  # overridden by Kargo
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+              name: http
+          env:
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: authenticwrite
+  labels:
+    app: authenticwrite
+    component: frontend
+spec:
+  type: ClusterIP
+  selector:
+    app: authenticwrite
+    component: frontend
+  ports:
+    - port: 80
+      targetPort: 80
+      name: http

@@ -1,0 +1,27 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: authenticwrite
+  namespace: authenticwrite
+  labels:
+    app: authenticwrite
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"  # or staging for non-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - authenticwrite.local  # overridden by overlays
+      secretName: authenticwrite-tls
+  rules:
+    - host: authenticwrite.local  # overridden by overlays
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80

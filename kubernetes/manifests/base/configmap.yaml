@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authenticwrite-config
+  namespace: authenticwrite
+  labels:
+    app: authenticwrite
+data:
+  # Backend config (may be extended)
+  FLASK_ENV: "production"
+  LOG_LEVEL: "INFO"
+
+  # Frontend config (injected into nginx env)
+  NAMESPACE: "authenticwrite"

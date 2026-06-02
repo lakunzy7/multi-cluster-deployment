@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: authenticwrite
+  labels:
+    app: authenticwrite
+    component: backend
+spec:
+  replicas: 1  # overridden by overlays
+  selector:
+    matchLabels:
+      app: authenticwrite
+      component: backend
+  template:
+    metadata:
+      labels:
+        app: authenticwrite
+        component: backend
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull-secret  # created by secrets task
+      containers:
+        - name: backend
+          image: ghcr.io/lakunzy7/authenticwrite/backend:latest  # overridden by Kargo
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5000
+              name: http
+          env:
+            - name: FLASK_ENV
+              value: "production"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 40
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "500m"
+            limits:
+              memory: "3Gi"
+              cpu: "1000m"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: authenticwrite
+  labels:
+    app: authenticwrite
+    component: backend
+spec:
+  type: ClusterIP
+  selector:
+    app: authenticwrite
+    component: backend
+  ports:
+    - port: 5000
+      targetPort: 5000
+      name: http

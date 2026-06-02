@@ -1,0 +1,46 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: authenticwrite
+  namespace: argocd
+spec:
+  goTemplate: true
+  generators:
+    # Generate one entry per environment
+    - list:
+        elements:
+          - name: dev
+            path: overlays/dev
+          - name: staging
+            path: overlays/staging
+          - name: prod
+            path: overlays/prod
+    # Cross-product with clusters matching env=multi label
+    - clusters:
+        selector:
+          matchLabels:
+            env: multi
+
+  template:
+    metadata:
+      name: "{{ .name }}-{{ .cluster.name }}"
+      labels:
+        app: authenticwrite
+        env: "{{ .name }}"
+        region: "{{ .cluster.metadata.labels.region }}"
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/lakunzy7/multi-cluster-deployment.git
+        targetRevision: main
+        path: "kubernetes/{{ .path }}"
+      destination:
+        server: "{{ .cluster.server }}"
+        namespace: authenticwrite
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - PrunePropagationPolicy=foreground

@@ -1,0 +1,104 @@
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Project
+metadata:
+  name: authenticwrite
+  namespace: kargo
+spec:
+  # ArgoCD integration — Kargo updates overlays/*/kustomization.yaml
+  # and triggers ArgoCD sync via the argocd-update steps below
+  roles:
+    - name: admin
+      permissions:
+        - action: "*"
+  eventNotificationReceiver:
+    subscriptions:
+      - selector: "registry=github"
+
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Warehouse
+metadata:
+  name: authenticwrite
+  namespace: kargo
+spec:
+  subscriptions:
+    - image:
+        repoURL: ghcr.io/lakunzy7/authenticwrite
+        # Tag filter: track all tags (dev, staging, prod, semantic versions)
+        semverConstraint: "*"
+
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: dev
+  namespace: kargo
+spec:
+  requestedFreight:
+    - name: authenticwrite
+  promotionMechanisms:
+    gitRepoUpdate:
+      writeToPath: overlays/dev
+      lastCommitMessage: "Kargo automated promotion to dev"
+    argocdUpdate:
+      applications:
+        - name: dev-cloudopshub-local
+          namespace: argocd
+        - name: dev-cloud-cluster
+          namespace: argocd
+      syncStrategy:
+        syncOnUpdate: true
+        # Wait for both regional dev apps to be Healthy before proceeding
+        waitForSync: true
+
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: staging
+  namespace: kargo
+spec:
+  requestedFreight:
+    - name: authenticwrite
+      sources:
+        stages:
+          - dev
+  promotionMechanisms:
+    gitRepoUpdate:
+      writeToPath: overlays/staging
+      lastCommitMessage: "Kargo automated promotion to staging"
+    argocdUpdate:
+      applications:
+        - name: staging-cloudopshub-local
+          namespace: argocd
+        - name: staging-cloud-cluster
+          namespace: argocd
+      syncStrategy:
+        syncOnUpdate: true
+        waitForSync: true
+
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: prod
+  namespace: kargo
+spec:
+  requestedFreight:
+    - name: authenticwrite
+      sources:
+        stages:
+          - staging
+  promotionMechanisms:
+    gitRepoUpdate:
+      writeToPath: overlays/prod
+      lastCommitMessage: "Kargo automated promotion to prod"
+    argocdUpdate:
+      applications:
+        - name: prod-cloudopshub-local
+          namespace: argocd
+        - name: prod-cloud-cluster
+          namespace: argocd
+      syncStrategy:
+        syncOnUpdate: true
+        waitForSync: true
