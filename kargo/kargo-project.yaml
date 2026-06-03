@@ -2,30 +2,19 @@ apiVersion: kargo.akuity.io/v1alpha1
 kind: Project
 metadata:
   name: authenticwrite
-  namespace: kargo
 spec:
-  # ArgoCD integration — Kargo updates overlays/*/kustomization.yaml
-  # and triggers ArgoCD sync via the argocd-update steps below
-  roles:
-    - name: admin
-      permissions:
-        - action: "*"
-  # GitHub container registry webhook receiver
-  eventNotificationReceiver:
-    subscriptions:
-      - selector: "registry=github"
+  promotionPolicies: []
 
 ---
 apiVersion: kargo.akuity.io/v1alpha1
 kind: Warehouse
 metadata:
   name: authenticwrite
-  namespace: kargo
+  namespace: authenticwrite
 spec:
   subscriptions:
     - image:
         repoURL: ghcr.io/lakunzy7/authenticwrite
-        # Tag filter: track all tags (dev, staging, prod, semantic versions)
         semverConstraint: "*"
 
 ---
@@ -33,73 +22,59 @@ apiVersion: kargo.akuity.io/v1alpha1
 kind: Stage
 metadata:
   name: dev
-  namespace: kargo
+  namespace: authenticwrite
 spec:
-  requestedFreight:
-    - name: authenticwrite
+  subscriptions:
+    warehouse: authenticwrite
   promotionMechanisms:
-    gitRepoUpdate:
-      writeToPath: overlays/dev
-      lastCommitMessage: "Kargo automated promotion to dev"
-    argocdUpdate:
-      applications:
-        - name: dev-cloudopshub-local
-          namespace: argocd
-        - name: dev-cloud-cluster
-          namespace: argocd
-      syncStrategy:
-        syncOnUpdate: true
-        # Wait for both regional dev apps to be Healthy before proceeding
-        waitForSync: true
+    gitRepoUpdates:
+      - repoURL: https://github.com/lakunzy7/multi-cluster-deployment.git
+        writeBranch: main
+        kustomize:
+          images:
+            - image: ghcr.io/lakunzy7/authenticwrite/backend
+              path: kubernetes/overlays/dev
+            - image: ghcr.io/lakunzy7/authenticwrite/frontend
+              path: kubernetes/overlays/dev
 
 ---
 apiVersion: kargo.akuity.io/v1alpha1
 kind: Stage
 metadata:
   name: staging
-  namespace: kargo
+  namespace: authenticwrite
 spec:
-  requestedFreight:
-    - name: authenticwrite
-      sources:
-        stages:
-          - dev
+  subscriptions:
+    upstreamStages:
+      - name: dev
   promotionMechanisms:
-    gitRepoUpdate:
-      writeToPath: overlays/staging
-      lastCommitMessage: "Kargo automated promotion to staging"
-    argocdUpdate:
-      applications:
-        - name: staging-cloudopshub-local
-          namespace: argocd
-        - name: staging-cloud-cluster
-          namespace: argocd
-      syncStrategy:
-        syncOnUpdate: true
-        waitForSync: true
+    gitRepoUpdates:
+      - repoURL: https://github.com/lakunzy7/multi-cluster-deployment.git
+        writeBranch: main
+        kustomize:
+          images:
+            - image: ghcr.io/lakunzy7/authenticwrite/backend
+              path: kubernetes/overlays/staging
+            - image: ghcr.io/lakunzy7/authenticwrite/frontend
+              path: kubernetes/overlays/staging
 
 ---
 apiVersion: kargo.akuity.io/v1alpha1
 kind: Stage
 metadata:
   name: prod
-  namespace: kargo
+  namespace: authenticwrite
 spec:
-  requestedFreight:
-    - name: authenticwrite
-      sources:
-        stages:
-          - staging
+  subscriptions:
+    upstreamStages:
+      - name: staging
   promotionMechanisms:
-    gitRepoUpdate:
-      writeToPath: overlays/prod
-      lastCommitMessage: "Kargo automated promotion to prod"
-    argocdUpdate:
-      applications:
-        - name: prod-cloudopshub-local
-          namespace: argocd
-        - name: prod-cloud-cluster
-          namespace: argocd
-      syncStrategy:
-        syncOnUpdate: true
-        waitForSync: true
+    gitRepoUpdates:
+      - repoURL: https://github.com/lakunzy7/multi-cluster-deployment.git
+        writeBranch: main
+        kustomize:
+          images:
+            - image: ghcr.io/lakunzy7/authenticwrite/backend
+              path: kubernetes/overlays/prod
+            - image: ghcr.io/lakunzy7/authenticwrite/frontend
+              path: kubernetes/overlays/prod
