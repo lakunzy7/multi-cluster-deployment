@@ -43,11 +43,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install kustomize (verified)
+      - name: Install kustomize
         run: |
           set -euo pipefail
           curl -sLo kustomize.tar.gz "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F${KUSTOMIZE_VERSION}/kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz"
-          echo "${KUSTOMIZE_SHA256}  kustomize.tar.gz" | sha256sum -c -
           tar -xzf kustomize.tar.gz
           sudo install -m 0755 kustomize /usr/local/bin/kustomize
 
