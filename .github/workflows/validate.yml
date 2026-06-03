@@ -52,13 +52,13 @@ jobs:
           sudo install -m 0755 kustomize /usr/local/bin/kustomize
 
       - name: Build dev overlay
-        run: kustomize build eshop-config/overlays/dev > /tmp/dev.yaml
+        run: kustomize build kubernetes/overlays/dev > /tmp/dev.yaml
 
       - name: Build staging overlay
-        run: kustomize build eshop-config/overlays/staging > /tmp/staging.yaml
+        run: kustomize build kubernetes/overlays/staging > /tmp/staging.yaml
 
       - name: Build prod overlay
-        run: kustomize build eshop-config/overlays/prod > /tmp/prod.yaml
+        run: kustomize build kubernetes/overlays/prod > /tmp/prod.yaml
 
       - name: Summarize generated resources
         run: |
@@ -99,7 +99,7 @@ jobs:
           set -euo pipefail
           for env in dev staging prod; do
             echo "=== validating $env ==="
-            kustomize build eshop-config/overlays/$env \
+            kustomize build kubernetes/overlays/$env \
               | kubeconform -strict -ignore-missing-schemas -kubernetes-version "${K8S_VERSION}" -summary
           done
 
@@ -123,8 +123,9 @@ jobs:
         uses: ibiqlik/action-yamllint@2576378a8e339169678f9939646ee3ee325e845c  # v3.1.1
         with:
           file_or_dir: |
-            eshop-config/
             kubernetes/
+            argocd-apps/
+            kargo/
           config_data: |
             extends: default
             rules:
@@ -186,7 +187,7 @@ jobs:
       - name: yaml syntax check on Kargo files
         run: |
           set -euo pipefail
-          for f in eshop-config/kargo/*.yaml; do
+          for f in kargo/*.yaml; do
             python3 -c "import yaml,sys; list(yaml.safe_load_all(open('$f')))" \
               && echo "ok: $f"
           done
