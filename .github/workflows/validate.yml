@@ -10,6 +10,7 @@ on:
 # Default to read-only. Each job opts in to anything more.
 permissions:
   contents: read
+  packages: write
 
 # Cancel an in-flight run on the same ref when a new push lands.
 concurrency:

@@ -4,39 +4,38 @@ metadata:
   name: authenticwrite
   namespace: argocd
 spec:
-  goTemplate: true
   generators:
-    # Generate one entry per environment
-    - list:
-        elements:
-          - name: dev
-            path: overlays/dev
-          - name: staging
-            path: overlays/staging
-          - name: prod
-            path: overlays/prod
-    # Cross-product with clusters matching env=multi label
-    - clusters:
-        selector:
-          matchLabels:
-            env: multi
+    - matrix:
+        generators:
+          # Generate one entry per environment
+          - list:
+              elements:
+                - env: dev
+                  path: overlays/dev
+          # Cross-product with explicit clusters
+          - list:
+              elements:
+                - cluster: cloudopshub-local
+                  server: https://kubernetes.default.svc
+                - cluster: cloud-cluster
+                  server: https://34.156.236.159
 
   template:
     metadata:
-      name: "{{ .name }}-{{ .cluster.name }}"
+      name: '{{env}}-{{cluster}}'
       labels:
         app: authenticwrite
-        env: "{{ .name }}"
-        region: "{{ .cluster.metadata.labels.region }}"
+        env: '{{env}}'
+        cluster: '{{cluster}}'
     spec:
       project: default
       source:
         repoURL: https://github.com/lakunzy7/multi-cluster-deployment.git
         targetRevision: main
-        path: "kubernetes/{{ .path }}"
+        path: 'kubernetes/{{path}}'
       destination:
-        server: "{{ .cluster.server }}"
-        namespace: authenticwrite
+        server: '{{server}}'
+        namespace: 'authenticwrite-{{env}}'
       syncPolicy:
         automated:
           prune: true
