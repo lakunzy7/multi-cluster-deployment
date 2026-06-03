@@ -1,0 +1,240 @@
+name: Build, Scan & Push Images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Dockerfile.*'
+      - 'app/**'
+      - 'backend/**'
+      - 'frontend/**'
+      - '.github/workflows/build-push-images.yml'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  TRIVY_VERSION: v0.50.0
+
+jobs:
+  metadata:
+    name: Generate image metadata
+    runs-on: ubuntu-latest
+    outputs:
+      backend_image: ${{ steps.images.outputs.backend_image }}
+      frontend_image: ${{ steps.images.outputs.frontend_image }}
+      image_tag: ${{ steps.images.outputs.image_tag }}
+    steps:
+      - name: Generate image tag
+        id: images
+        run: |
+          TAG="${{ github.sha }}"
+          SHORT_SHA="${TAG:0:8}"
+          backend_image="${{ env.REGISTRY }}/${{ github.repository }}/backend:${SHORT_SHA}"
+          frontend_image="${{ env.REGISTRY }}/${{ github.repository }}/frontend:${SHORT_SHA}"
+          echo "backend_image=${backend_image}" >> $GITHUB_OUTPUT
+          echo "frontend_image=${frontend_image}" >> $GITHUB_OUTPUT
+          echo "image_tag=${SHORT_SHA}" >> $GITHUB_OUTPUT
+
+  build-backend:
+    name: Build backend image
+    runs-on: ubuntu-latest
+    needs: metadata
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0  # v2.12.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@c47758b664c736549414d4cfc5ac36eb31f7cbf1  # v3.6.0
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7185  # v3.3.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25  # v5.4.0
+        with:
+          context: .
+          file: ./Dockerfile.backend
+          push: true
+          tags: |
+            ${{ needs.metadata.outputs.backend_image }}
+            ${{ env.REGISTRY }}/${{ github.repository }}/backend:latest
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}/backend:buildcache
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}/backend:buildcache,mode=max
+
+  build-frontend:
+    name: Build frontend image
+    runs-on: ubuntu-latest
+    needs: metadata
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0  # v2.12.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@c47758b664c736549414d4cfc5ac36eb31f7cbf1  # v3.6.0
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7185  # v3.3.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25  # v5.4.0
+        with:
+          context: .
+          file: ./Dockerfile.frontend
+          push: true
+          tags: |
+            ${{ needs.metadata.outputs.frontend_image }}
+            ${{ env.REGISTRY }}/${{ github.repository }}/frontend:latest
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}/frontend:buildcache
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}/frontend:buildcache,mode=max
+
+  scan-backend:
+    name: Scan backend image
+    runs-on: ubuntu-latest
+    needs: [metadata, build-backend]
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0  # v2.12.0
+        with:
+          egress-policy: audit
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7185  # v3.3.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run Trivy scan on backend image
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1  # 0.35.0
+        with:
+          image-ref: ${{ needs.metadata.outputs.backend_image }}
+          format: sarif
+          output: trivy-backend.sarif
+          severity: HIGH,CRITICAL
+          exit-code: '0'
+
+      - name: Upload Trivy results for backend
+        if: always()
+        uses: github/codeql-action/upload-sarif@8c78abb9b62512e3c45dea6559ffd924ed8549c8  # v3.28.0
+        with:
+          sarif_file: trivy-backend.sarif
+          category: trivy-backend
+
+  scan-frontend:
+    name: Scan frontend image
+    runs-on: ubuntu-latest
+    needs: [metadata, build-frontend]
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0  # v2.12.0
+        with:
+          egress-policy: audit
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7185  # v3.3.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run Trivy scan on frontend image
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1  # 0.35.0
+        with:
+          image-ref: ${{ needs.metadata.outputs.frontend_image }}
+          format: sarif
+          output: trivy-frontend.sarif
+          severity: HIGH,CRITICAL
+          exit-code: '0'
+
+      - name: Upload Trivy results for frontend
+        if: always()
+        uses: github/codeql-action/upload-sarif@8c78abb9b62512e3c45dea6559ffd924ed8549c8  # v3.28.0
+        with:
+          sarif_file: trivy-frontend.sarif
+          category: trivy-frontend
+
+  notify-kargo:
+    name: Trigger Kargo webhook
+    runs-on: ubuntu-latest
+    needs: [metadata, scan-backend, scan-frontend]
+    if: success()
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0  # v2.12.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Create payload for image update
+        id: payload
+        run: |
+          cat > image-update.json <<EOF
+          {
+            "backend": "${{ needs.metadata.outputs.backend_image }}",
+            "frontend": "${{ needs.metadata.outputs.frontend_image }}",
+            "timestamp": "$(date -u +'%Y-%m-%dT%H:%M:%SZ')",
+            "sha": "${{ github.sha }}"
+          }
+          EOF
+          cat image-update.json
+
+      - name: Trigger multi-cluster-deployment repo workflow
+        run: |
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITOPS_REPO_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository_owner }}/multi-cluster-deployment/dispatches" \
+            -d '{
+              "event_type": "images-built",
+              "client_payload": {
+                "backend_image": "${{ needs.metadata.outputs.backend_image }}",
+                "frontend_image": "${{ needs.metadata.outputs.frontend_image }}",
+                "sha": "${{ github.sha }}"
+              }
+            }'
+
+  summary:
+    name: Workflow Summary
+    runs-on: ubuntu-latest
+    needs: [metadata, build-backend, build-frontend, scan-backend, scan-frontend, notify-kargo]
+    if: always()
+    steps:
+      - name: Print image details
+        run: |
+          echo "=== Build Summary ==="
+          echo "Backend:  ${{ needs.metadata.outputs.backend_image }}"
+          echo "Frontend: ${{ needs.metadata.outputs.frontend_image }}"
+          echo "Tag:      ${{ needs.metadata.outputs.image_tag }}"
+          echo ""
+          echo "Images available at:"
+          echo "  https://github.com/${{ github.repository_owner }}/packages"
