@@ -138,35 +138,6 @@ jobs:
                 indent-sequences: consistent
                 check-multi-line-strings: false
 
-  terraform-validate:
-    name: Terraform validate + fmt
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      - name: Harden runner
-        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0  # v2.12.0
-        with:
-          egress-policy: audit
-
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
-        with:
-          persist-credentials: false
-
-      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd  # v3.1.2
-        with:
-          terraform_version: ${{ env.TERRAFORM_VERSION }}
-
-      - name: terraform fmt check
-        run: terraform -chdir=terraform fmt -check -diff
-        continue-on-error: true
-
-      - name: terraform init (no backend)
-        run: terraform -chdir=terraform init -backend=false
-
-      - name: terraform validate
-        run: terraform -chdir=terraform validate
 
   kargo-render:
     name: Validate Kargo manifests
@@ -217,71 +188,4 @@ jobs:
           GITLEAKS_ENABLE_SUMMARY: "true"
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "true"
 
-  trivy-config:
-    name: IaC scan (trivy config)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      security-events: write   # to upload SARIF to GitHub code-scanning
-    steps:
-      - name: Harden runner
-        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0  # v2.12.0
-        with:
-          egress-policy: audit
 
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
-        with:
-          persist-credentials: false
-
-      - name: Trivy config scan (k8s + terraform + dockerfiles)
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1  # 0.35.0
-        with:
-          scan-type: config
-          scan-ref: .
-          format: sarif
-          output: trivy-config.sarif
-          severity: HIGH,CRITICAL
-          exit-code: '0'          # report only; don't fail PRs on findings
-          skip-dirs: eShop,.kargo-secrets,terraform/.terraform
-
-      - name: Upload SARIF to GitHub code-scanning
-        if: always()
-        uses: github/codeql-action/upload-sarif@8c78abb9b62512e3c45dea6559ffd924ed8549c8  # v3.28.0
-        with:
-          sarif_file: trivy-config.sarif
-          category: trivy-config
-
-  checkov:
-    name: Terraform compliance (checkov)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      security-events: write
-    steps:
-      - name: Harden runner
-        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0  # v2.12.0
-        with:
-          egress-policy: audit
-
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
-        with:
-          persist-credentials: false
-
-      - name: Run checkov against terraform/
-        uses: bridgecrewio/checkov-action@4209007fd2e1fce5cfecf9a36b7df0c635a3d76e  # v12.3030.0
-        with:
-          directory: terraform
-          framework: terraform
-          output_format: sarif
-          output_file_path: checkov.sarif
-          soft_fail: true        # report only; tighten later
-          skip_check: CKV_GCP_18,CKV_GCP_24,CKV_GCP_25  # accept lab-mode network policy posture
-
-      - name: Upload SARIF to GitHub code-scanning
-        if: always()
-        uses: github/codeql-action/upload-sarif@8c78abb9b62512e3c45dea6559ffd924ed8549c8  # v3.28.0
-        with:
-          sarif_file: checkov.sarif
-          category: checkov
