@@ -10,6 +10,7 @@ spec:
     - name: admin
       permissions:
         - action: "*"
+  # GitHub container registry webhook receiver
   eventNotificationReceiver:
     subscriptions:
       - selector: "registry=github"
