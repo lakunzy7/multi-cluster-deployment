@@ -70,21 +70,59 @@ argocd cluster patch cloud-cluster --patch '{"metadata":{"labels":{"env":"multi"
 
 ### 5️⃣ Deploy Kargo (To Kind)
 
+> **⚠️ Reality check (June 2026):** Kargo `v0.6.0` on Kubernetes `v1.36.1` will *not* install with a bare `helm install kargo/kargo`. You **must** pin the chart version, pre-install cert-manager, raise host inotify limits, inject a bcrypt admin password, and disable Argo Rollouts integration. The clean, repeatable recipe is below — see [Lessons Learned](#lessons-learned-kargo-installation-on-a-modern-cluster) at the bottom for the why.
+
 ```bash
 kubectl config use-context kind-cloudopshub-local
 
-# Create namespace
+# --- Host-level prep (one-time per VM) ---
+# Kargo controller watches a lot of files; default inotify limits cause it to crash.
+sudo sysctl -w fs.inotify.max_user_watches=524288
+sudo sysctl -w fs.inotify.max_user_instances=512
+
+# --- Cluster-level prep ---
+# cert-manager is required for Kargo's webhook certificates.
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.3/cert-manager.yaml
+kubectl wait --for=condition=Available --timeout=180s \
+  deployment/cert-manager deployment/cert-manager-webhook deployment/cert-manager-cainjector \
+  -n cert-manager
+
+# --- Namespace ---
 kubectl create namespace kargo
 
-# Install Kargo
-helm install kargo kargo/kargo --namespace kargo --wait
+# --- Install Kargo (pinned, hardened) ---
+# Values are committed at kargo/values.yaml — see "Lessons Learned" for what each key does.
+helm upgrade --install kargo oci://ghcr.io/akuity/kargo-charts/kargo \
+  --version 0.6.0 \
+  --namespace kargo \
+  -f kargo/values.yaml \
+  --wait
 
 # Deploy project
 kubectl apply -f kargo/kargo-project.yaml -n kargo
 
+# Verify all four Kargo pods are 1/1 Running (no CrashLoopBackOff)
+kubectl get pods -n kargo
+
 # Port-forward
 kubectl port-forward -n kargo svc/kargo-api 8080:8080
-# Visit: http://localhost:8080
+# Visit: http://localhost:8080  (user: admin / password: admin)
+```
+
+**`kargo/values.yaml`** (committed in the repo):
+
+```yaml
+api:
+  adminAccount:
+    # bcrypt("admin") — chart 0.6.0 refuses to start without a hash.
+    passwordHash: $2a$10$Zrhhie4vLz5ygtVSaif6o.qN36jgs6vjtMBdM6yrU1FOeiAAMMxOm
+    tokenSigningKey: cloudopshub-local-dev-key
+  rollouts:
+    integrationEnabled: false   # No Argo Rollouts CRDs in this cluster.
+controller:
+  rollouts:
+    integrationEnabled: false   # Same — otherwise controller logs flood with
+                                # "no kind is registered for v1alpha1.AnalysisRun".
 ```
 
 ### 6️⃣ Deploy Monitoring to Kind
@@ -256,6 +294,47 @@ kubectl logs -n kargo deployment/kargo-controller
 kubectl get warehouse -n kargo
 ```
 
+### Kargo controller stuck in CrashLoopBackOff with `"the server has asked for the client to provide credentials"`?
+
+The `kargo-controller` ServiceAccount is stuck in `Terminating` because of a
+leftover `kargo.akuity.io/finalizer` from a prior install. The pod mounts a
+projected token for an SA the API server now treats as gone — every API call
+the controller makes is rejected at scheme-discovery time.
+
+```bash
+# Confirm: deletionTimestamp set + finalizer present
+kubectl get sa -n kargo kargo-controller -o yaml | grep -E "deletionTimestamp|finalizers" -A1
+
+# Strip the finalizer so the SA fully deletes
+kubectl patch sa kargo-controller -n kargo --type=merge \
+  -p '{"metadata":{"finalizers":[]}}'
+
+# Re-apply Helm to recreate a clean SA with a fresh token
+helm upgrade kargo oci://ghcr.io/akuity/kargo-charts/kargo \
+  --version 0.6.0 -n kargo -f kargo/values.yaml
+
+# Restart the controller pod
+kubectl delete pod -n kargo -l app.kubernetes.io/component=controller
+```
+
+### Kargo controller logs flooded with `"no kind is registered for v1alpha1.AnalysisRun"`?
+Argo Rollouts integration is enabled but its CRDs aren't installed. Make sure
+your values use the chart-0.6.0 keys — `controller.rollouts.integrationEnabled`
+and `api.rollouts.integrationEnabled` — **not** the legacy
+`kargoController.argoRolloutsIntegration` (which 0.6.0 silently ignores).
+Confirm with:
+```bash
+kubectl get cm -n kargo kargo-controller -o jsonpath='{.data.ROLLOUTS_INTEGRATION_ENABLED}'
+# Should print: false
+```
+
+### Namespace stuck in `Terminating`?
+```bash
+kubectl get ns <name> -o json \
+  | jq '.spec.finalizers = []' \
+  | kubectl replace --raw "/api/v1/namespaces/<name>/finalize" -f -
+```
+
 ### Secrets not unsealing?
 ```bash
 kubectl logs -n sealed-secrets deployment/sealed-secrets-controller
@@ -283,3 +362,112 @@ See `docs/HELM_DEPLOYMENT.md` for detailed instructions.
 ---
 
 **Commit**: `1d69a41`
+
+---
+
+## Lessons Learned: Kargo Installation on a Modern Cluster
+
+The original copy-paste recipe (`helm install kargo kargo/kargo --wait`) assumes
+defaults that no longer hold on a Kubernetes `v1.36.1` cluster running chart
+`kargo-0.6.0`. This section documents the five interventions that turn the
+naive install into a deterministic one, and **why each one is required**.
+
+### The Strategy: "Clean Slate" Orchestration
+
+Treat the Kargo install not as one command but as a five-stage orchestration.
+Skip any stage and the install fails — usually silently, sometimes loudly.
+
+#### Step 1 — Cluster preparation (host kernel tuning)
+The Kargo controller watches a large number of CRD informers and Git working
+trees. On default Ubuntu/Debian VMs the inotify limits are too low and the
+controller dies with `too many open files` or stalls during informer startup.
+
+```bash
+sudo sysctl -w fs.inotify.max_user_watches=524288
+sudo sysctl -w fs.inotify.max_user_instances=512
+```
+
+Persist by writing the same lines to `/etc/sysctl.d/99-kargo.conf`.
+
+#### Step 2 — Dependency resolution (cert-manager)
+Kargo's admission webhook is served over TLS by certificates issued by
+`cert-manager`. Without it, the Helm install completes but the webhook
+endpoint fails its readiness gate and every subsequent `kubectl apply` of a
+Kargo CR (`Project`, `Stage`, `Warehouse`) is rejected with a TLS handshake error.
+
+```bash
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.3/cert-manager.yaml
+```
+
+#### Step 3 — Version pinning & security injection
+Chart `0.6.0` **mandates** a bcrypt password hash and signing key for the API
+server. Omitting them aborts the Helm install with
+`api.adminAccount.passwordHash is required`. We pin both the chart version and
+the credentials in `kargo/values.yaml` so the recipe stays reproducible:
+
+```yaml
+api:
+  adminAccount:
+    passwordHash: $2a$10$Zrhhie4vLz5ygtVSaif6o.qN36jgs6vjtMBdM6yrU1FOeiAAMMxOm  # bcrypt("admin")
+    tokenSigningKey: cloudopshub-local-dev-key
+```
+
+#### Step 4 — Integration decoupling (Argo Rollouts off)
+Out of the box, the controller and API server both try to watch
+`AnalysisRun` / `AnalysisTemplate` CRDs from Argo Rollouts. If those CRDs
+aren't installed, the controller logs an endless stream of
+`no kind is registered for the type v1alpha1.AnalysisRun` errors.
+
+**Important:** the chart-0.6.0 keys are `controller.rollouts.integrationEnabled`
+and `api.rollouts.integrationEnabled`. The older flag
+`kargoController.argoRolloutsIntegration` (which appears in some blog posts
+and earlier drafts of this guide) is **silently ignored** by 0.6.0 — the
+ConfigMap will still report `ROLLOUTS_INTEGRATION_ENABLED=true`.
+
+#### Step 5 — Finalizer rescue (when a previous install is wedged)
+If a prior `helm uninstall` or namespace delete was interrupted, the
+`kargo-controller` ServiceAccount can end up stuck in `Terminating` with the
+`kargo.akuity.io/finalizer` still attached. The new pod then mounts a
+projected token for an SA the API server considers gone, and the controller
+crashes at startup with:
+
+```
+error initializing Kargo controller manager: failed to determine if *v1.Secret
+is namespaced: failed to get restmapping: failed to get server groups:
+the server has asked for the client to provide credentials
+```
+
+The fix is to remove the finalizer directly, then let Helm reconcile a fresh
+SA (with a fresh projected token):
+
+```bash
+kubectl patch sa kargo-controller -n kargo --type=merge \
+  -p '{"metadata":{"finalizers":[]}}'
+helm upgrade kargo oci://ghcr.io/akuity/kargo-charts/kargo \
+  --version 0.6.0 -n kargo -f kargo/values.yaml
+kubectl delete pod -n kargo -l app.kubernetes.io/component=controller
+```
+
+### Delta vs. the original quick-start
+
+| Concern | Original expectation | Actual June-2026 reality |
+| --- | --- | --- |
+| Chart versioning | Implicit (`kargo/kargo` latest) | **Pinned** to `oci://ghcr.io/akuity/kargo-charts/kargo` `v0.6.0` |
+| Admin password | None | **Mandatory** bcrypt `passwordHash` + `tokenSigningKey` |
+| System tuning | Not mentioned | **Required**: raise `fs.inotify.max_user_watches` + `max_user_instances` |
+| Webhook TLS | Assumed available | **Required**: install `cert-manager` first |
+| Argo Rollouts | "Just works" | Must **explicitly disable** via the correct 0.6.0 keys |
+| Stuck SA / namespace recovery | Not documented | **Manual finalizer strip** required when uninstall left wreckage |
+
+### Why these matter
+
+Strictly following the legacy recipe fails at every stage: the controller
+panics on inotify limits, the chart aborts on missing credentials, the webhook
+never gets a certificate, the controller crashes looking for Rollouts CRDs,
+and any uninstall leaves a wedged SA that breaks the next install. The
+defensive configuration above wraps the original logic so that it runs
+deterministically on a high-version (`v1.36.1`) cluster.
+
+After Step 5, the four Kargo pods (`kargo-api`, `kargo-controller`,
+`kargo-management-controller`, `kargo-webhooks-server`) should all report
+`1/1 Running`. You're ready to move on to Step 6 (deploy ApplicationSets).
