@@ -4,7 +4,7 @@ kind: Kustomization
 namespace: authenticwrite
 
 bases:
-  - ../../manifests/base
+  - ../../base
 
 namePrefix: prod-
 
