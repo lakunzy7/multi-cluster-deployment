@@ -3,8 +3,6 @@ kind: Kustomization
 
 namespace: authenticwrite
 
-bases:
-  - ../../base
 
 namePrefix: dev-
 
@@ -12,28 +10,36 @@ commonLabels:
   env: dev
 
 replicas:
-  - name: backend
-    count: 1
-  - name: frontend
-    count: 1
+- count: 1
+  name: backend
+- count: 1
+  name: frontend
 
 patches:
-  - target:
-      kind: Ingress
-      name: authenticwrite
-    patch: |-
-      - op: replace
-        path: /spec/rules/0/host
-        value: dev.authenticwrite.local
-      - op: replace
-        path: /spec/tls/0/hosts/0
-        value: dev.authenticwrite.local
-      - op: replace
-        path: /spec/tls/0/secretName
-        value: dev-authenticwrite-tls
+- patch: |-
+    - op: replace
+      path: /spec/rules/0/host
+      value: dev.authenticwrite.local
+    - op: replace
+      path: /spec/tls/0/hosts/0
+      value: dev.authenticwrite.local
+    - op: replace
+      path: /spec/tls/0/secretName
+      value: dev-authenticwrite-tls
+  target:
+    kind: Ingress
+    name: authenticwrite
 
 images:
-  - name: ghcr.io/lakunzy7/authenticwrite/backend
-    newTag: dev  # will be overridden by Kargo
-  - name: ghcr.io/lakunzy7/authenticwrite/frontend
-    newTag: dev  # will be overridden by Kargo
+- name: backend
+  newName: ghcr.io/lakunzy7/authenticwrite/backend
+  newTag: 4ab776fc
+- name: frontend
+  newName: ghcr.io/lakunzy7/authenticwrite/frontend
+  newTag: 4ab776fc
+- name: ghcr.io/lakunzy7/authenticwrite/backend
+  newTag: dev
+- name: ghcr.io/lakunzy7/authenticwrite/frontend
+  newTag: dev
+resources:
+- ../../base
