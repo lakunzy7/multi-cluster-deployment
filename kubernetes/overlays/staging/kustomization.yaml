@@ -3,8 +3,6 @@ kind: Kustomization
 
 namespace: authenticwrite
 
-bases:
-  - ../../base
 
 namePrefix: staging-
 
@@ -12,28 +10,36 @@ commonLabels:
   env: staging
 
 replicas:
-  - name: backend
-    count: 2
-  - name: frontend
-    count: 2
+- count: 2
+  name: backend
+- count: 2
+  name: frontend
 
 patches:
-  - target:
-      kind: Ingress
-      name: authenticwrite
-    patch: |-
-      - op: replace
-        path: /spec/rules/0/host
-        value: staging.authenticwrite.local
-      - op: replace
-        path: /spec/tls/0/hosts/0
-        value: staging.authenticwrite.local
-      - op: replace
-        path: /spec/tls/0/secretName
-        value: staging-authenticwrite-tls
+- patch: |-
+    - op: replace
+      path: /spec/rules/0/host
+      value: staging.authenticwrite.local
+    - op: replace
+      path: /spec/tls/0/hosts/0
+      value: staging.authenticwrite.local
+    - op: replace
+      path: /spec/tls/0/secretName
+      value: staging-authenticwrite-tls
+  target:
+    kind: Ingress
+    name: authenticwrite
 
 images:
-  - name: ghcr.io/lakunzy7/authenticwrite/backend
-    newTag: staging  # will be overridden by Kargo
-  - name: ghcr.io/lakunzy7/authenticwrite/frontend
-    newTag: staging  # will be overridden by Kargo
+- name: backend
+  newName: ghcr.io/lakunzy7/authenticwrite/backend
+  newTag: manual123
+- name: frontend
+  newName: ghcr.io/lakunzy7/authenticwrite/frontend
+  newTag: manual123
+- name: ghcr.io/lakunzy7/authenticwrite/backend
+  newTag: staging
+- name: ghcr.io/lakunzy7/authenticwrite/frontend
+  newTag: staging
+resources:
+- ../../base

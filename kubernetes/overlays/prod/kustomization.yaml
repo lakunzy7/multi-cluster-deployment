@@ -3,8 +3,6 @@ kind: Kustomization
 
 namespace: authenticwrite
 
-bases:
-  - ../../base
 
 namePrefix: prod-
 
@@ -12,28 +10,36 @@ commonLabels:
   env: prod
 
 replicas:
-  - name: backend
-    count: 3
-  - name: frontend
-    count: 3
+- count: 3
+  name: backend
+- count: 3
+  name: frontend
 
 patches:
-  - target:
-      kind: Ingress
-      name: authenticwrite
-    patch: |-
-      - op: replace
-        path: /spec/rules/0/host
-        value: authenticwrite.example.com
-      - op: replace
-        path: /spec/tls/0/hosts/0
-        value: authenticwrite.example.com
-      - op: replace
-        path: /spec/tls/0/secretName
-        value: prod-authenticwrite-tls
+- patch: |-
+    - op: replace
+      path: /spec/rules/0/host
+      value: authenticwrite.example.com
+    - op: replace
+      path: /spec/tls/0/hosts/0
+      value: authenticwrite.example.com
+    - op: replace
+      path: /spec/tls/0/secretName
+      value: prod-authenticwrite-tls
+  target:
+    kind: Ingress
+    name: authenticwrite
 
 images:
-  - name: ghcr.io/lakunzy7/authenticwrite/backend
-    newTag: prod  # will be overridden by Kargo
-  - name: ghcr.io/lakunzy7/authenticwrite/frontend
-    newTag: prod  # will be overridden by Kargo
+- name: backend
+  newName: ghcr.io/lakunzy7/authenticwrite/backend
+  newTag: manual123
+- name: frontend
+  newName: ghcr.io/lakunzy7/authenticwrite/frontend
+  newTag: manual123
+- name: ghcr.io/lakunzy7/authenticwrite/backend
+  newTag: prod
+- name: ghcr.io/lakunzy7/authenticwrite/frontend
+  newTag: prod
+resources:
+- ../../base
