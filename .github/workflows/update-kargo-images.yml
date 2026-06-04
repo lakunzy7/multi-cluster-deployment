@@ -39,21 +39,30 @@ jobs:
           echo "Frontend: ${FRONTEND}"
           echo "SHA:      ${SHA:0:8}"
 
-      - name: Update dev overlay with new images
+      - name: Update overlays with new images
         run: |
           # Install kustomize
           curl -sLo kustomize.tar.gz "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz"
           tar -xzf kustomize.tar.gz && sudo install -m 0755 kustomize /usr/local/bin/
 
-          # Update dev overlay
-          cd kubernetes/overlays/dev
-          kustomize edit set image \
-            backend=${{ steps.extract.outputs.backend_image }} \
-            frontend=${{ steps.extract.outputs.frontend_image }}
+          # Update all overlays
+          for overlay in dev staging prod; do
+            echo "=== Updating $overlay overlay ==="
+            cd kubernetes/overlays/$overlay
+            kustomize edit set image \
+              backend=${{ steps.extract.outputs.backend_image }} \
+              frontend=${{ steps.extract.outputs.frontend_image }}
+            echo "Updated $overlay kustomization.yaml"
+            cd ../../..
+          done
 
           # Verify changes
-          echo "=== Updated dev kustomization.yaml ==="
-          cat kustomization.yaml | grep -A 10 "images:" || echo "No images section yet"
+          echo ""
+          echo "=== Verification ==="
+          for overlay in dev staging prod; do
+            echo "--- $overlay overlay ---"
+            grep -A 5 "images:" kubernetes/overlays/$overlay/kustomization.yaml || echo "No images section"
+          done
 
       - name: Create pull request for image update
         uses: peter-evans/create-pull-request@v6
