@@ -3,6 +3,8 @@ kind: Stage
 metadata:
   name: prod
   namespace: authenticwrite
+  annotations:
+    kargo.akuity.io/color: purple
 spec:
   requestedFreight:
   - origin:
@@ -18,5 +20,5 @@ spec:
         value: prod
       steps:
       - task:
-          name: promote-to-prod
+          name: default-promote
         as: promote-to-prod
