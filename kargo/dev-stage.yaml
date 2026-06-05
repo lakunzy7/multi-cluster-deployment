@@ -1,0 +1,21 @@
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: dev
+  namespace: authenticwrite
+spec:
+  requestedFreight:
+  - origin:
+      kind: Warehouse
+      name: authenticwrite
+    sources:
+      direct: true
+  promotionTemplate:
+    spec:
+      vars:
+      - name: targetBranch
+        value: dev
+      steps:
+      - task:
+          name: promote-to-dev
+        as: promote-to-dev

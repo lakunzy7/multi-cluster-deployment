@@ -3,7 +3,11 @@ kind: Project
 metadata:
   name: authenticwrite
 spec:
-  promotionPolicies: []
+  promotionPolicies:
+  - stage: dev
+    autoPromotionEnabled: true
+  - stage: staging
+    autoPromotionEnabled: false
 
 ---
 apiVersion: kargo.akuity.io/v1alpha1
@@ -13,68 +17,8 @@ metadata:
   namespace: authenticwrite
 spec:
   subscriptions:
-    - image:
-        repoURL: ghcr.io/lakunzy7/authenticwrite
-        semverConstraint: "*"
-
----
-apiVersion: kargo.akuity.io/v1alpha1
-kind: Stage
-metadata:
-  name: dev
-  namespace: authenticwrite
-spec:
-  subscriptions:
-    warehouse: authenticwrite
-  promotionMechanisms:
-    gitRepoUpdates:
-      - repoURL: https://github.com/lakunzy7/multi-cluster-deployment.git
-        writeBranch: main
-        kustomize:
-          images:
-            - image: ghcr.io/lakunzy7/authenticwrite/backend
-              path: kubernetes/overlays/dev
-            - image: ghcr.io/lakunzy7/authenticwrite/frontend
-              path: kubernetes/overlays/dev
-
----
-apiVersion: kargo.akuity.io/v1alpha1
-kind: Stage
-metadata:
-  name: staging
-  namespace: authenticwrite
-spec:
-  subscriptions:
-    upstreamStages:
-      - name: dev
-  promotionMechanisms:
-    gitRepoUpdates:
-      - repoURL: https://github.com/lakunzy7/multi-cluster-deployment.git
-        writeBranch: main
-        kustomize:
-          images:
-            - image: ghcr.io/lakunzy7/authenticwrite/backend
-              path: kubernetes/overlays/staging
-            - image: ghcr.io/lakunzy7/authenticwrite/frontend
-              path: kubernetes/overlays/staging
-
----
-apiVersion: kargo.akuity.io/v1alpha1
-kind: Stage
-metadata:
-  name: prod
-  namespace: authenticwrite
-spec:
-  subscriptions:
-    upstreamStages:
-      - name: staging
-  promotionMechanisms:
-    gitRepoUpdates:
-      - repoURL: https://github.com/lakunzy7/multi-cluster-deployment.git
-        writeBranch: main
-        kustomize:
-          images:
-            - image: ghcr.io/lakunzy7/authenticwrite/backend
-              path: kubernetes/overlays/prod
-            - image: ghcr.io/lakunzy7/authenticwrite/frontend
-              path: kubernetes/overlays/prod
+  - image:
+      repoURL: ghcr.io/lakunzy7/authenticwrite
+      imageSelectionStrategy: SemVer
+      allowTags: '^v\d+\.\d+\.\d+$'
+      semverConstraint: '>= 0.0.1'

@@ -34,6 +34,6 @@ patches:
 
 images:
   - name: ghcr.io/lakunzy7/authenticwrite/backend
-    newTag: dev  # will be overridden by Kargo
+    newTag: latest
   - name: ghcr.io/lakunzy7/authenticwrite/frontend
-    newTag: dev  # will be overridden by Kargo
+    newTag: latest
