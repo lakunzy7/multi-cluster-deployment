@@ -4,7 +4,6 @@ kind: Kustomization
 resources:
 - project.yaml
 - warehouse-demo.yaml
-- promotiontask.yaml
 - dev-stage.yaml
 - staging-stage.yaml
 - prod-stage.yaml
