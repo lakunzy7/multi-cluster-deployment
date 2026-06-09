@@ -1,0 +1,32 @@
+# Sealed Secrets controller (Bitnami)
+# Repo:  https://bitnami-labs.github.io/sealed-secrets
+# Chart: sealed-secrets/sealed-secrets
+#
+# Install:
+#   helm repo add sealed-secrets https://bitnami-labs.github.io/sealed-secrets
+#   helm install sealed-secrets sealed-secrets/sealed-secrets \
+#     --namespace sealed-secrets --create-namespace \
+#     -f helm/sealed-secrets/values.yaml
+#
+# CLI used to seal: kubeseal v0.37.0
+
+fullnameOverride: sealed-secrets
+
+# Run in its own namespace
+namespace: sealed-secrets
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
+
+# Key rotation: controller creates a new sealing key every 30 days by default.
+# Old keys are retained so previously-sealed secrets still decrypt.
+# keyrenewperiod: "720h"   # uncomment to override (0 disables rotation)
+
+metrics:
+  serviceMonitor:
+    enabled: false   # set true if Prometheus Operator is installed

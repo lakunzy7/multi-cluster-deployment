@@ -1,0 +1,32 @@
+# TEMPLATE ONLY — contains NO real secrets. Safe to commit.
+#
+# This is the *input* you feed to kubeseal. Fill in the 3 real values,
+# seal it, then commit the SEALED output (add-cluster-sealed.yaml) — NOT
+# this filled-in file.
+#
+# How to fill + seal:
+#   1. name/server/bearerToken/caData -> see helm/argocd/add-cluster-guide.md (Step 3)
+#   2. kubeseal --controller-namespace sealed-secrets --controller-name sealed-secrets \
+#        --context kind-cloudopshub-local --format yaml \
+#        < helm/argocd/add-cluster.yaml > helm/argocd/add-cluster-sealed.yaml
+#   3. kubectl --context=kind-cloudopshub-local apply -f helm/argocd/add-cluster-sealed.yaml
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: k8slab-second-cluster
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: cluster
+type: Opaque
+stringData:
+  name: k8slab-second-cluster
+  server: https://REPLACE_WITH_CLUSTER_SERVER_URL
+  config: |
+    {
+      "bearerToken": "REPLACE_WITH_SERVICEACCOUNT_TOKEN",
+      "tlsClientConfig": {
+        "insecure": false,
+        "caData": "REPLACE_WITH_BASE64_CA_DATA"
+      }
+    }

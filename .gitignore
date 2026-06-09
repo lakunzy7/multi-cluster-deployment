@@ -4,6 +4,10 @@ eShop/
 # Local Kargo admin credentials
 .kargo-secrets/
 
+# Sealed Secrets master/private key backups — NEVER commit (vault these)
+*.key
+sealed-secrets-master*.yaml
+
 # ArgoCD cluster Secret with rendered bearer token (regenerate per env)
 eshop-config/argocd-clusters/gke-cluster-secret.yaml
 
