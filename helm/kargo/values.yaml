@@ -1,11 +1,13 @@
 # Kargo Helm Chart Values - Simplified
+# Latest Version: v1.10.5 (2024-12)
+# Helm Chart: 1.10.x
 # Install: helm repo add kargo https://charts.kargo.io
 #          helm install kargo kargo/kargo -f helm/kargo/values.yaml -n kargo --create-namespace
 
 # Image Configuration
 image:
   repository: ghcr.io/akuity/kargo
-  tag: ""  # Uses chart appVersion (v1.10.5+)
+  tag: v1.10.5  # Latest stable version
   pullPolicy: IfNotPresent
 
 # Global Settings

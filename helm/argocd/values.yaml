@@ -1,6 +1,8 @@
 # ArgoCD Helm Chart Values
-# Install: helm repo add argocd https://argoproj.github.io/argo-helm
-#          helm install argocd argocd/argo-cd -f helm/argocd/values.yaml -n argocd --create-namespace
+# Latest Version: v3.4.3 (2024-12)
+# Helm Chart: 7.6.x
+# Install: helm repo add argo https://argoproj.github.io/argo-helm
+#          helm install argocd argo/argo-cd -f helm/argocd/values.yaml -n argocd --create-namespace
 
 global:
   domain: argocd.example.com

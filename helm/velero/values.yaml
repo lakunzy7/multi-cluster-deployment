@@ -1,11 +1,13 @@
 # Velero Helm Chart Values - Backup & Disaster Recovery
+# Latest Version: v1.13.2 (2024-12)
+# Helm Chart: 8.3.x
 # Install: helm repo add vmware-tanzu https://vmware-tanzu.github.io/helm-charts
 #          helm install velero vmware-tanzu/velero -f helm/velero/values.yaml -n velero --create-namespace
 
 # Image
 image:
   repository: velero/velero
-  tag: v1.13.0
+  tag: v1.13.2
   pullPolicy: IfNotPresent
 
 # Resources
