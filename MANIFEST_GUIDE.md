@@ -4,30 +4,24 @@
 
 ```
 multi-cluster-deployment/
-├── helm/                                    # Helm chart values
+├── helm/                                    # Helm chart values (for cluster setup)
 │   ├── argocd/
-│   │   └── values.yaml                     # ArgoCD configuration (future)
-│   └── kargo/
-│       └── values.yaml                     # Kargo Helm installation values
+│   │   └── values.yaml                     # ArgoCD Helm installation
+│   ├── kargo/
+│   │   └── values.yaml                     # Kargo Helm installation
+│   ├── prometheus/
+│   │   └── values.yaml                     # Prometheus/Grafana stack
+│   └── velero/
+│       └── values.yaml                     # Velero backup & recovery
 │
 ├── kubernetes/                              # All Kubernetes manifests
 │   ├── infrastructure/                     # System components (cluster-wide)
-│   │   ├── argocd/                        # ArgoCD setup
-│   │   │   ├── argocd-namespace.yml       # Namespace definition
-│   │   │   └── argocd-install.yml         # Service + NodePort + ConfigMap
-│   │   ├── kargo/                         # Kargo GitOps workflow
-│   │   │   ├── project.yaml               # Kargo Project (defines authenticwrite)
-│   │   │   ├── warehouse-demo.yaml        # Image registry watcher
-│   │   │   ├── dev-stage.yaml             # Dev environment (auto-promote)
-│   │   │   ├── staging-stage.yaml         # Staging (manual approval required)
-│   │   │   └── prod-stage.yaml            # Production (manual approval required)
-│   │   ├── monitoring/                    # Observability stack
-│   │   │   ├── prometheus-deployment.yaml
-│   │   │   └── grafana-deployment.yaml
-│   │   ├── sealed-secrets/                # Secret encryption
-│   │   │   └── sealed-secrets-install.yaml
-│   │   └── velero/                        # Backup & recovery
-│   │       └── velero-install.yaml
+│   │   └── kargo/                         # Kargo GitOps workflow (GitOps config only)
+│   │       ├── project.yaml               # Kargo Project (defines authenticwrite)
+│   │       ├── warehouse-demo.yaml        # Image registry watcher
+│   │       ├── dev-stage.yaml             # Dev environment (auto-promote)
+│   │       ├── staging-stage.yaml         # Staging (manual approval required)
+│   │       └── prod-stage.yaml            # Production (manual approval required)
 │   ├── base/                               # App base configuration
 │   │   ├── kustomization.yaml             # Kustomize build config
 │   │   ├── namespace.yaml                 # authenticwrite namespace
@@ -77,17 +71,22 @@ multi-cluster-deployment/
 ## File Purposes
 
 ### Helm Values (`helm/`)
+Install cluster infrastructure using Helm charts. These are values files for each component.
+
+- **`helm/argocd/values.yaml`** — ArgoCD Helm chart configuration
+  - `helm install argocd argo/argo-cd -f helm/argocd/values.yaml -n argocd --create-namespace`
+
 - **`helm/kargo/values.yaml`** — Kargo Helm chart configuration
-  - Used when installing/upgrading Kargo via Helm
-  - Contains API settings, controller config, storage, RBAC, etc.
+  - `helm install kargo kargo/kargo -f helm/kargo/values.yaml -n kargo --create-namespace`
+
+- **`helm/prometheus/values.yaml`** — Prometheus/Grafana/AlertManager stack
+  - `helm install prometheus prometheus-community/kube-prometheus-stack -f helm/prometheus/values.yaml -n monitoring --create-namespace`
+
+- **`helm/velero/values.yaml`** — Velero backup & disaster recovery
+  - `helm install velero vmware-tanzu/velero -f helm/velero/values.yaml -n velero --create-namespace`
 
 ### Infrastructure (`kubernetes/infrastructure/`)
-These are cluster-wide system components installed once per cluster.
-
-#### ArgoCD (`kubernetes/infrastructure/argocd/`)
-- **`argocd-namespace.yml`** — Creates `argocd` namespace
-- **`argocd-install.yml`** — Additional config (NodePort Service, ConfigMap for cluster setup)
-  - *Note*: Actual ArgoCD pods are installed via Helm or direct manifest from upstream
+GitOps configuration files. Applied AFTER Helm installations.
 
 #### Kargo (`kubernetes/infrastructure/kargo/`)
 These define the **GitOps promotion workflow** for your app.
@@ -117,15 +116,6 @@ These define the **GitOps promotion workflow** for your app.
   - **Manual approval required**: `kargo promote authenticwrite prod --from staging`
   - Gets images from `staging` stage (upstream dependency)
 
-#### Monitoring (`kubernetes/infrastructure/monitoring/`)
-- **`prometheus-deployment.yaml`** — Metrics collection
-- **`grafana-deployment.yaml`** — Metrics visualization
-
-#### Sealed Secrets (`kubernetes/infrastructure/sealed-secrets/`)
-- **`sealed-secrets-install.yaml`** — Encrypted secret management
-
-#### Velero (`kubernetes/infrastructure/velero/`)
-- **`velero-install.yaml`** — Cluster backup & recovery
 
 ### Application Deployment (`kubernetes/base/` & `kubernetes/overlays/`)
 These define your actual application.
@@ -204,16 +194,34 @@ These define your actual application.
 When setting up a new cluster:
 
 ```bash
-# 1. Install infrastructure (one-time per cluster)
-kubectl apply -f kubernetes/infrastructure/argocd/
-kubectl apply -f kubernetes/infrastructure/monitoring/
-kubectl apply -f kubernetes/infrastructure/sealed-secrets/
+# 1. Add Helm repositories
+helm repo add argo https://argoproj.github.io/argo-helm
+helm repo add kargo https://charts.kargo.io
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo add vmware-tanzu https://vmware-tanzu.github.io/helm-charts
+helm repo update
 
-# 2. Install ArgoCD (via Helm with helm/argocd/values.yaml)
-helm repo add argocd https://argoproj.github.io/argo-helm
-helm install argocd argocd/argo-cd -f helm/argocd/values.yaml -n argocd
+# 2. Install Prometheus (monitoring)
+helm install prometheus prometheus-community/kube-prometheus-stack \
+  -f helm/prometheus/values.yaml \
+  -n monitoring --create-namespace
 
-# 3. Create app namespace and secrets
+# 3. Install ArgoCD
+helm install argocd argo/argo-cd \
+  -f helm/argocd/values.yaml \
+  -n argocd --create-namespace
+
+# 4. Install Kargo
+helm install kargo kargo/kargo \
+  -f helm/kargo/values.yaml \
+  -n kargo --create-namespace
+
+# 5. Install Velero (backup)
+helm install velero vmware-tanzu/velero \
+  -f helm/velero/values.yaml \
+  -n velero --create-namespace
+
+# 6. Create app namespace and secrets
 kubectl create namespace authenticwrite
 kubectl create secret docker-registry ghcr-secret \
   --docker-server=ghcr.io \
@@ -221,13 +229,13 @@ kubectl create secret docker-registry ghcr-secret \
   --docker-password=YOUR_TOKEN \
   -n authenticwrite
 
-# 4. Apply Kargo workflow config
+# 7. Apply Kargo workflow config (GitOps)
 kubectl apply -f kubernetes/infrastructure/kargo/
 
-# 5. Apply ArgoCD applications
+# 8. Apply ArgoCD applications
 kubectl apply -f argocd-apps/
 
-# 6. Apply app deployment manifests
+# 9. Apply app deployment manifests
 kubectl apply -k kubernetes/overlays/dev
 ```
 
@@ -248,16 +256,19 @@ kubectl apply -k kubernetes/overlays/dev
 | Add a new image registry to watch | `kubernetes/infrastructure/kargo/warehouse-demo.yaml` |
 | Change dev→staging approval policy | `kubernetes/infrastructure/kargo/staging-stage.yaml` |
 | Adjust replica counts per env | `kubernetes/overlays/{dev,staging,prod}/kustomization.yaml` |
-| Configure ArgoCD clusters | `kubernetes/infrastructure/argocd/argocd-install.yml` |
+| Configure ArgoCD via Helm | `helm/argocd/values.yaml` |
+| Configure Kargo via Helm | `helm/kargo/values.yaml` |
+| Configure Prometheus/Grafana | `helm/prometheus/values.yaml` |
+| Configure Velero backups | `helm/velero/values.yaml` |
 | Build images in CI | `.github/workflows/build-push-images.yml` |
-| Add monitoring dashboards | `kubernetes/infrastructure/monitoring/` |
-| Update Kargo Helm config | `helm/kargo/values.yaml` |
 
 ---
 
-## Next Steps
+## Installation Steps
 
-1. **Commit these changes** to Git
-2. **Verify all manifests validate**: `kubectl apply --dry-run=client -f kubernetes/`
-3. **Test the promotion flow**: Push code → Check Kargo → Promote to prod
-4. **Set GitHub webhook** (see `docs/GITHUB-WEBHOOKS-SETUP.md`)
+1. **Add Helm repositories** (see Installation & Deployment Order section above)
+2. **Install each component via Helm** in order: Prometheus → ArgoCD → Kargo → Velero
+3. **Create app namespace and GHCR credentials**
+4. **Apply Kargo workflow config**: `kubectl apply -f kubernetes/infrastructure/kargo/`
+5. **Apply ArgoCD applications**: `kubectl apply -f argocd-apps/`
+6. **Test the promotion flow**: Push code → Check Kargo → Promote to staging/prod
