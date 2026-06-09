@@ -12,6 +12,10 @@ spec:
               elements:
                 - env: dev
                   path: overlays/dev
+                - env: staging
+                  path: overlays/staging
+                - env: prod
+                  path: overlays/prod
           # Cross-product with explicit clusters
           - list:
               elements:
