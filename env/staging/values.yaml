@@ -1,4 +1,5 @@
 backend:
+  tag: latest
   replicas: 2
   resources:
     requests:
@@ -9,6 +10,7 @@ backend:
       cpu: "1000m"
 
 frontend:
+  tag: latest
   replicas: 2
   resources:
     requests:
