@@ -1,5 +1,5 @@
 backend:
-  tag: latest
+  tag: 1aa96cb6
   replicas: 1
   resources:
     requests:
@@ -10,7 +10,7 @@ backend:
       cpu: "500m"
 
 frontend:
-  tag: latest
+  tag: 1aa96cb6
   replicas: 1
   resources:
     requests:
