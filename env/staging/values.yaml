@@ -1,8 +1,4 @@
-environment: staging
-
 backend:
-  image: ghcr.io/lakunzy7/authenticwrite/backend
-  tag: latest
   replicas: 2
   resources:
     requests:
@@ -13,8 +9,6 @@ backend:
       cpu: "1000m"
 
 frontend:
-  image: ghcr.io/lakunzy7/authenticwrite/frontend
-  tag: latest
   replicas: 2
   resources:
     requests:
@@ -23,9 +17,3 @@ frontend:
     limits:
       memory: "256Mi"
       cpu: "500m"
-
-imagePullSecrets:
-  - name: ghcr-pull-secret
-
-ingress:
-  enabled: false

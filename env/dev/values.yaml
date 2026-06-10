@@ -1,8 +1,4 @@
-environment: dev
-
 backend:
-  image: ghcr.io/lakunzy7/authenticwrite/backend
-  tag: latest
   replicas: 1
   resources:
     requests:
@@ -13,8 +9,6 @@ backend:
       cpu: "500m"
 
 frontend:
-  image: ghcr.io/lakunzy7/authenticwrite/frontend
-  tag: latest
   replicas: 1
   resources:
     requests:
@@ -23,9 +17,3 @@ frontend:
     limits:
       memory: "128Mi"
       cpu: "250m"
-
-imagePullSecrets:
-  - name: ghcr-pull-secret
-
-ingress:
-  enabled: false

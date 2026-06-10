@@ -1,6 +1,4 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: authenticwrite-{{ .Values.environment | default "dev" }}
-  labels:
-    app: authenticwrite
+  name: {{ .Release.Namespace }}

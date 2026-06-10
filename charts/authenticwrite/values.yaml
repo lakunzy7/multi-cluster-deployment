@@ -1,3 +1,6 @@
+nameOverride: ""
+fullnameOverride: ""
+
 backend:
   image: ghcr.io/lakunzy7/authenticwrite/backend
   tag: latest
@@ -24,12 +27,3 @@ frontend:
 
 imagePullSecrets:
   - name: ghcr-pull-secret
-
-ingress:
-  enabled: false
-  className: nginx
-  hosts:
-    - host: authenticwrite.local
-      paths:
-        - path: /
-          pathType: Prefix
