@@ -42,9 +42,6 @@ spec:
         - uses: git-push
           config:
               path: ./out
-        #              credentials:
-        #                  secretRef:
-        #                      name: github-creds
         - uses: argocd-update
           config:
               apps:
