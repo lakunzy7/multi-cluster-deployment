@@ -21,6 +21,9 @@ spec:
       checkout:
       - branch: ${{ vars.branch }}
         path: ./out
+      credentials:
+        secretRef:
+          name: github-creds
   - uses: yaml-update
     as: update-backend-image
     config:
@@ -43,6 +46,9 @@ spec:
   - uses: git-push
     config:
       path: ./out
+      credentials:
+        secretRef:
+          name: github-creds
   - uses: argocd-update
     config:
       apps:
