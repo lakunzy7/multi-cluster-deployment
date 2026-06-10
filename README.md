@@ -1,190 +1,363 @@
-# CloudOpsHub: Multi-Cluster Kubernetes Deployment
+# AuthenticWrite: Multi-Cluster Kubernetes Deployment
 
-A complete infrastructure-as-code setup for deploying AuthenticWrite analytics app across two Kubernetes clusters.
+GitOps repository for deploying AuthenticWrite (backend + frontend) across multiple Kubernetes clusters using ArgoCD and Kargo.
 
-## Quick Overview
+## Features
 
-- **App**: AuthenticWrite (Flask backend + React frontend)
-- **Clusters**: Kind (local) + GKE (production)
-- **Promotion**: dev → staging → prod (manual approval at each stage)
-- **GitOps**: ArgoCD manages deployments, Kargo manages promotion
+* **Warehouse** monitoring container registries for new images
+* **Three-Stage Pipeline**: dev → staging → prod
+* **Image Tag Promotion**: Automatic image discovery and promotion
+* **Multi-Cluster Support**: Deploy to Kind (local) and GKE (cloud)
+* **Helm-based Deployment**: Templated manifests with environment overrides
+* **GitOps Automation**: Kargo commits image updates, ArgoCD syncs
 
-## Start Here: Follow the Deployment Checklist
+## Requirements
+
+* Kargo v1.3+ (or switch to appropriate release branch)
+* ArgoCD v2.8+
+* kubectl configured with access to target clusters
+* GitHub account with GHCR (GitHub Container Registry) access
+* Git installed locally
+
+## Quick Start
+
+### 1. Prerequisites Check
 
 ```bash
-# Phase 1: Setup Kind cluster
-kind create cluster --config=kubernetes/kind-cluster-config.yml --name cloudopshub-local
+# Verify kubectl access to clusters
+kubectl config get-contexts
 
-# Phase 2: Deploy ArgoCD
-kubectl apply -f kubernetes/argocd-namespace.yml
-kubectl apply -f kubernetes/argocd-install.yml
+# Ensure ArgoCD is running
+kubectl get pods -n argocd | head -5
 
-# Phase 3: Deploy ApplicationSets
-kubectl apply -f argocd-apps/applicationset-authenticwrite.yaml
+# Verify Kargo is installed
+kubectl get pods -n kargo | head -5
+```
 
-# Phase 4: Deploy Kargo
-kubectl apply -f kargo/kargo-project.yaml
+### 2. Configure Credentials
 
-# Phase 5: Deploy Monitoring
-kubectl apply -f monitoring/prometheus-deployment.yaml
-kubectl apply -f monitoring/grafana-deployment.yaml
+Add Git credentials to Kargo so it can commit image updates:
 
-# Phase 6: Deploy Backup
-kubectl apply -f kubernetes/velero-install.yaml
-kubectl apply -f kubernetes/sealed-secrets-install.yaml
+```bash
+kargo create credentials github-creds \
+  --project authenticwrite \
+  --git \
+  --username <your-github-username> \
+  --repo-url https://github.com/lakunzy7/multi-cluster-deployment.git
+```
+
+**Important**: The token must have permission to:
+- Commit changes to this repository
+- Create pull requests (if using PR mode)
+
+### 3. Deploy ArgoCD Resources
+
+```bash
+# Create AppProject (defines deployment boundaries)
+kubectl apply -f argocd/appproj.yaml
+
+# Create ApplicationSet (generates Applications for each environment)
+kubectl apply -f argocd/appset.yaml
+```
+
+Verify Applications are created:
+```bash
+kubectl get applications -n argocd | grep authenticwrite
+```
+
+### 4. Deploy Kargo Resources
+
+```bash
+# Create Kargo Project namespace
+kubectl apply -f kargo/project.yaml
+
+# Create Warehouse (monitors image registries)
+kubectl apply -f kargo/warehouse.yaml
+
+# Create Stages (dev → staging → prod pipeline)
+kubectl apply -f kargo/stages.yaml
+
+# Create PromotionTask (defines promotion workflow)
+kubectl apply -f kargo/promotiontask.yaml
+```
+
+Verify Kargo resources:
+```bash
+kubectl get warehouses -n authenticwrite
+kubectl get stages -n authenticwrite
+kubectl get promotiontasks -n authenticwrite
+```
+
+### 5. Sync Applications
+
+Trigger ArgoCD to deploy applications:
+
+```bash
+argocd app sync authenticwrite-dev
+argocd app sync authenticwrite-staging
+argocd app sync authenticwrite-prod
+```
+
+Or use kubectl:
+```bash
+kubectl patch application authenticwrite-dev -n argocd \
+  --type merge -p '{"operation":"sync"}'
 ```
 
 ## Directory Structure
 
 ```
 .
-├── Dockerfile.backend              # Flask + RoBERTa backend
-├── Dockerfile.frontend             # React + nginx frontend
-├── nginx.conf                      # Nginx API proxy config
-├── kubernetes/
-│   ├── argocd-install.yml         # ArgoCD deployment
-│   ├── argocd-namespace.yml       # ArgoCD namespace
-│   ├── cluster-secrets.yml        # Cluster credentials for GKE
-│   ├── kind-cluster-config.yml    # Kind cluster config
-│   ├── sealed-secrets-install.yml # Secret encryption
-│   ├── velero-install.yaml        # Backup solution
-│   ├── manifests/base/            # Base app manifests
-│   │   ├── namespace.yaml
-│   │   ├── backend.yaml
-│   │   ├── frontend.yaml
-│   │   ├── configmap.yaml
-│   │   ├── ingress.yaml
-│   │   └── kustomization.yaml
-│   └── overlays/                  # Per-environment configs
-│       ├── dev/kustomization.yaml
-│       ├── staging/kustomization.yaml
-│       └── prod/kustomization.yaml
-├── argocd-apps/
-│   └── applicationset-authenticwrite.yaml  # Generates 6 apps (3 envs × 2 clusters)
+├── README.md                          # This file
+├── argocd/
+│   ├── appproj.yaml                  # ArgoCD Project (security boundary)
+│   └── appset.yaml                   # ApplicationSet (generates Applications)
 ├── kargo/
-│   └── kargo-project.yaml         # Promotion pipeline (dev → staging → prod)
-├── monitoring/
-│   ├── prometheus-deployment.yaml # Metrics
-│   └── grafana-deployment.yaml    # Dashboards
-├── docs/
-│   ├── DEPLOYMENT_READY.md        # Complete 12-phase checklist
-│   ├── DEPLOYMENT_RUNBOOK.md      # Step-by-step deployment
-│   ├── CI_SETUP.md                # GitHub Actions setup
-│   ├── BACKUP_RUNBOOK.md          # Backup/restore procedures
-│   └── MONITORING_RUNBOOK.md      # Prometheus/Grafana setup
-└── terraform/                      # GKE infrastructure (optional)
+│   ├── project.yaml                  # Kargo Project namespace
+│   ├── warehouse.yaml                # Image registry monitoring
+│   ├── stages.yaml                   # Three stages: dev, staging, prod
+│   └── promotiontask.yaml            # Promotion workflow definition
+├── charts/
+│   └── authenticwrite/               # Helm chart for AuthenticWrite
+│       ├── Chart.yaml
+│       ├── values.yaml               # Base values
+│       └── templates/
+│           ├── namespace.yaml
+│           ├── backend.yaml
+│           ├── frontend.yaml
+├── env/                              # Environment-specific values
+│   ├── dev/values.yaml               # Dev environment config
+│   ├── staging/values.yaml           # Staging environment config
+│   └── prod/values.yaml              # Production environment config
+├── helm/                             # Infrastructure Helm values
+│   ├── argocd/values.yaml            # ArgoCD installation config
+│   └── kargo/values.yaml             # Kargo installation config
+├── terraform/                        # GKE infrastructure as code
+└── .github/workflows/                # CI/CD pipelines
 ```
 
-## Key Files to Know
+## Deployment Pipeline
+
+### Image Promotion Flow
+
+```
+1. AuthenticWrite repo builds images → pushes to ghcr.io
+   ↓
+2. Kargo Warehouse detects new images
+   ↓
+3. Freight created with new image tags
+   ↓
+4. User promotes Freight through stages:
+   - dev (auto-promotion)
+   - staging (manual approval)
+   - prod (manual approval)
+   ↓
+5. PromotionTask runs:
+   - Git clone this repo
+   - Update image tags in env/{stage}/values.yaml
+   - Commit and push changes
+   - Trigger ArgoCD sync
+   ↓
+6. ArgoCD syncs updated Helm values to clusters
+   ↓
+7. New images deployed to environment
+```
+
+### Stages
+
+| Stage | Environment | Replicas | Approval | Description |
+|-------|------------|----------|----------|-------------|
+| **dev** | authenticwrite-dev | 1 | Auto | Development environment |
+| **staging** | authenticwrite-staging | 2 | Manual | Pre-production testing |
+| **prod** | authenticwrite-prod | 3 | Manual | Production deployment |
+
+## Key Files
 
 | File | Purpose |
 |------|---------|
-| `kubernetes/kind-cluster-config.yml` | Creates local Kind cluster |
-| `kubernetes/argocd-*.yml` | Sets up ArgoCD on Kind |
-| `argocd-apps/applicationset-authenticwrite.yaml` | Deploys app to both clusters |
-| `kargo/kargo-project.yaml` | Controls promotion (dev → staging → prod) |
-| `kubernetes/manifests/base/` | App manifests (k8s-agnostic) |
-| `kubernetes/overlays/{dev,staging,prod}/` | Environment-specific overrides |
-| `monitoring/prometheus-deployment.yaml` | Metrics scraping |
-| `monitoring/grafana-deployment.yaml` | Dashboards |
-
-## Deployment Steps (30 mins for first deployment)
-
-1. **Phase 1-2**: Create Kind cluster + deploy ArgoCD (10 mins)
-2. **Phase 3-4**: Deploy ApplicationSets + Kargo (5 mins)
-3. **Phase 5-6**: Deploy monitoring + backups (10 mins)
-4. **Phase 7-8**: Set up secrets + GKE integration (10 mins)
-5. **Phase 9-10**: Test images + smoke test (10 mins)
-6. **Phase 11-12**: Backup test + push to GitHub
-
-→ See `docs/DEPLOYMENT_READY.md` for complete phase-by-phase guide
-
-## Critical Setup Items
-
-⚠️ **Before deploying**, ensure you have:
-- Docker installed (for Kind)
-- kubectl installed
-- GitHub PAT (`GITOPS_REPO_TOKEN` secret on AuthenticWrite repo)
-- AWS account (for Velero S3 backups)
-
-⚠️ **Important**: Kind kubeconfig needs server IP patched for in-cluster networking (see Phase 3 in `docs/DEPLOYMENT_READY.md`)
-
-## CI/CD Pipeline
-
-GitHub Actions on AuthenticWrite repo (`lakunzy7/AuthenticWrite`):
-1. Builds backend + frontend images
-2. Scans with Trivy (security)
-3. Pushes to ghcr.io
-4. Triggers Kargo to update this repo with new image tags
-5. ArgoCD syncs to both clusters
-
-→ See `docs/CI_SETUP.md` for setup instructions
-
-## Environments
-
-| Environment | Replicas | Hostname | Where |
-|---|---|---|---|
-| dev | 1 | dev.authenticwrite.local | Kind + GKE |
-| staging | 2 | staging.authenticwrite.local | Kind + GKE |
-| prod | 3 | authenticwrite.example.com | Kind + GKE |
-
-**Promotion is manual**: user explicitly approves each stage transition via Kargo CLI or UI.
+| `argocd/appproj.yaml` | Defines which repos/clusters ArgoCD can deploy to |
+| `argocd/appset.yaml` | Generates Applications for each env (dev/staging/prod) |
+| `kargo/warehouse.yaml` | Monitors `ghcr.io/lakunzy7/authenticwrite/{backend,frontend}` |
+| `kargo/stages.yaml` | Defines promotion stages and approval requirements |
+| `kargo/promotiontask.yaml` | Script that updates image tags and triggers ArgoCD |
+| `charts/authenticwrite/` | Helm chart deployed by ArgoCD |
+| `env/{dev,staging,prod}/values.yaml` | Per-environment configurations (replicas, resources, etc.) |
 
 ## Useful Commands
 
+### View Status
+
 ```bash
-# View ArgoCD
-kubectl port-forward -n argocd svc/argocd-server 8080:443
-
-# View Kargo
-kubectl port-forward -n kargo svc/kargo 8080:8080
-
-# View Grafana
-kubectl port-forward -n monitoring svc/grafana 3000:3000
-
-# Check deployed apps
+# Check ArgoCD Applications
 kubectl get applications -n argocd
 
-# Promote to staging
+# Check Kargo Warehouse
+kubectl get warehouses -n authenticwrite
+
+# Check Kargo Stages
+kubectl get stages -n authenticwrite
+
+# Check created Freight (detected images)
+kubectl get freight -n authenticwrite
+
+# Check Promotions
+kubectl get promotions -n authenticwrite
+```
+
+### Port Forward to UI
+
+```bash
+# ArgoCD (https://localhost:8080)
+kubectl port-forward -n argocd svc/argocd-server 8080:443
+
+# Kargo (http://localhost:3100)
+kubectl port-forward -n kargo svc/kargo-api 3100:3100
+```
+
+### Promote Images (CLI)
+
+```bash
+# Promote to staging (requires manual approval)
 kargo promote authenticwrite staging --from dev
 
-# Check backups
-velero backup get
-velero schedule describe daily-backup
+# Promote to prod
+kargo promote authenticwrite prod --from staging
+
+# Check promotion status
+kargo get promotion -n authenticwrite
 ```
+
+### Check Application Deployments
+
+```bash
+# Check dev environment
+kubectl get deployments -n authenticwrite-dev
+kubectl get pods -n authenticwrite-dev
+
+# Check staging environment
+kubectl get deployments -n authenticwrite-staging
+kubectl get pods -n authenticwrite-staging
+
+# Check prod environment
+kubectl get deployments -n authenticwrite-prod
+kubectl get pods -n authenticwrite-prod
+```
+
+### View Logs
+
+```bash
+# Kargo controller logs
+kubectl logs -n kargo deployment/kargo-controller -f
+
+# ArgoCD application controller
+kubectl logs -n argocd deployment/argocd-application-controller -f
+
+# Backend deployment
+kubectl logs -n authenticwrite-dev deployment/backend -f
+
+# Frontend deployment
+kubectl logs -n authenticwrite-dev deployment/frontend -f
+```
+
+## Environment Configuration
+
+Each environment has its own values file that overrides the base chart:
+
+### Dev (`env/dev/values.yaml`)
+- 1 replica (fast feedback)
+- Lower resource requests
+
+### Staging (`env/staging/values.yaml`)
+- 2 replicas (test scaling)
+- Production-like resources
+
+### Prod (`env/prod/values.yaml`)
+- 3 replicas (high availability)
+- Higher resource limits
+- Ingress enabled
 
 ## Troubleshooting
 
-**Apps not syncing?**
-- Check ArgoCD logs: `kubectl logs -n argocd deployment/argocd-application-controller`
-- Verify cluster registration: `argocd cluster list`
+### Applications not syncing
 
-**Kargo not detecting images?**
-- Check Warehouse: `kubectl get warehouses -n kargo`
-- Verify image tags in GHCR: https://github.com/lakunzy7?tab=packages
+```bash
+# Check ArgoCD logs
+kubectl logs -n argocd deployment/argocd-application-controller
 
-**Sealed-secrets issues?**
-- Check controller: `kubectl logs -n sealed-secrets deployment/sealed-secrets-controller`
-- Verify keys are synced to GKE (see `docs/DEPLOYMENT_READY.md`)
+# Check Application status
+kubectl describe application authenticwrite-dev -n argocd
 
-**Velero backups failing?**
-- Check S3 credentials: `kubectl get secret -n velero cloud-credentials -o yaml`
-- See `docs/BACKUP_RUNBOOK.md` for detailed troubleshooting
+# Manual sync
+argocd app sync authenticwrite-dev
+```
+
+### Kargo not detecting images
+
+```bash
+# Check Warehouse status
+kubectl describe warehouse authenticwrite -n authenticwrite
+
+# Check if images are public on GHCR
+# https://github.com/lakunzy7?tab=packages
+
+# Manually trigger Warehouse refresh
+kubectl rollout restart deployment/kargo-controller -n kargo
+```
+
+### Promotion failing
+
+```bash
+# Check Promotion status
+kubectl describe promotion <promotion-name> -n authenticwrite
+
+# Check PromotionTask logs (in promotion pod)
+kubectl logs -n authenticwrite -l app=kargo,promotion=<promotion-id>
+
+# Check Git credentials
+kubectl get secret github-creds -n authenticwrite -o yaml
+```
+
+### Pods not running in environment namespace
+
+```bash
+# Check if namespace exists
+kubectl get ns authenticwrite-dev
+
+# Check if Helm release exists
+helm list -n authenticwrite-dev
+
+# Get application status
+kubectl describe application authenticwrite-dev -n argocd
+
+# Check resource quotas
+kubectl describe quota -n authenticwrite-dev
+```
+
+## Multi-Cluster Setup
+
+This repo supports deploying to multiple clusters. Clusters must be registered in ArgoCD.
+
+Register additional cluster:
+```bash
+argocd cluster add <cluster-context> --name <cluster-name>
+```
+
+The ApplicationSet will automatically deploy to all registered clusters.
 
 ## Next Steps
 
-1. **Read** `docs/DEPLOYMENT_READY.md` (complete checklist)
-2. **Follow** phases 1-12 to deploy end-to-end
-3. **Run** smoke tests (phase 10)
-4. **Push** to GitHub when satisfied
+1. **Verify Prerequisites**: Run `./verify-setup.sh` (if available)
+2. **Deploy**: Follow "Quick Start" section above
+3. **Test Promotion**: Manually promote via Kargo UI or CLI
+4. **Monitor**: Watch logs and check pod status
+5. **Iterate**: Update values in `env/{stage}/values.yaml` to test changes
 
-## Support
+## Support & Documentation
 
-- **Deployment questions?** → See `docs/DEPLOYMENT_RUNBOOK.md`
-- **CI/CD setup?** → See `docs/CI_SETUP.md`
-- **Backup questions?** → See `docs/BACKUP_RUNBOOK.md`
-- **Monitoring setup?** → See `docs/MONITORING_RUNBOOK.md`
+- **Kargo Docs**: https://kargo.akuity.io
+- **ArgoCD Docs**: https://argo-cd.readthedocs.io
+- **Helm Docs**: https://helm.sh/docs
 
 ---
 
-**Ready to deploy?** Start with `docs/DEPLOYMENT_READY.md` 🚀
+**Status**: Ready to deploy 🚀
