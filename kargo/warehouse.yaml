@@ -1,0 +1,17 @@
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Warehouse
+metadata:
+  name: authenticwrite
+  namespace: authenticwrite
+spec:
+  subscriptions:
+  - image:
+      repoURL: ghcr.io/lakunzy7/authenticwrite/backend
+      imageSelectionStrategy: NewestBuild
+      allowTags: '^[0-9a-f]{8}$'
+      discoveryLimit: 10
+  - image:
+      repoURL: ghcr.io/lakunzy7/authenticwrite/frontend
+      imageSelectionStrategy: NewestBuild
+      allowTags: '^[0-9a-f]{8}$'
+      discoveryLimit: 10

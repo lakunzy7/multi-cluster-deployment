@@ -1,0 +1,7 @@
+apiVersion: v2
+name: authenticwrite
+description: A Helm chart for Kubernetes multi-cluster deployment of authenticwrite
+
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

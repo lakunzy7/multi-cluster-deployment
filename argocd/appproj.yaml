@@ -1,0 +1,18 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: authenticwrite
+  namespace: argocd
+spec:
+  clusterResourceWhitelist:
+  - group: ""
+    kind: Namespace
+  destinations:
+  - name: '*'
+    namespace: authenticwrite-*
+    server: '*'
+  namespaceResourceWhitelist:
+  - group: '*'
+    kind: '*'
+  sourceRepos:
+  - https://github.com/lakunzy7/multi-cluster-deployment.git

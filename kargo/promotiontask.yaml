@@ -1,0 +1,49 @@
+apiVersion: kargo.akuity.io/v1alpha1
+kind: PromotionTask
+metadata:
+  name: promote-authenticwrite
+  namespace: authenticwrite
+spec:
+  vars:
+  - name: backendImage
+    value: ghcr.io/lakunzy7/authenticwrite/backend
+  - name: frontendImage
+    value: ghcr.io/lakunzy7/authenticwrite/frontend
+  - name: repoURL
+    value: https://github.com/lakunzy7/multi-cluster-deployment.git
+  - name: branch
+    value: main
+
+  steps:
+  - uses: git-clone
+    config:
+      repoURL: ${{ vars.repoURL }}
+      checkout:
+      - branch: ${{ vars.branch }}
+        path: ./out
+  - uses: yaml-update
+    as: update-backend-image
+    config:
+      path: ./out/env/${{ ctx.stage }}/values.yaml
+      updates:
+      - key: backend.tag
+        value: ${{ imageFrom( vars.backendImage ).Tag }}
+  - uses: yaml-update
+    as: update-frontend-image
+    config:
+      path: ./out/env/${{ ctx.stage }}/values.yaml
+      updates:
+      - key: frontend.tag
+        value: ${{ imageFrom( vars.frontendImage ).Tag }}
+  - uses: git-commit
+    as: commit
+    config:
+      path: ./out
+      message: "chore: promote ${{ ctx.stage }} to backend ${{ imageFrom( vars.backendImage ).Tag }} frontend ${{ imageFrom( vars.frontendImage ).Tag }}"
+  - uses: git-push
+    config:
+      path: ./out
+  - uses: argocd-update
+    config:
+      apps:
+      - name: authenticwrite-${{ ctx.stage }}

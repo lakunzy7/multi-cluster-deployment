@@ -1,0 +1,37 @@
+environment: prod
+
+backend:
+  image: ghcr.io/lakunzy7/authenticwrite/backend
+  tag: latest
+  replicas: 3
+  resources:
+    requests:
+      memory: "2Gi"
+      cpu: "500m"
+    limits:
+      memory: "4Gi"
+      cpu: "2000m"
+
+frontend:
+  image: ghcr.io/lakunzy7/authenticwrite/frontend
+  tag: latest
+  replicas: 3
+  resources:
+    requests:
+      memory: "64Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "500m"
+
+imagePullSecrets:
+  - name: ghcr-pull-secret
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: authenticwrite.prod
+      paths:
+        - path: /
+          pathType: Prefix

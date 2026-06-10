@@ -1,0 +1,63 @@
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: dev
+  namespace: authenticwrite
+  annotations:
+    kargo.akuity.io/color: green
+spec:
+  requestedFreight:
+  - origin:
+      kind: Warehouse
+      name: authenticwrite
+    sources:
+      direct: true
+  promotionTemplate:
+    spec:
+      steps:
+      - task:
+          name: promote-authenticwrite
+
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: staging
+  namespace: authenticwrite
+  annotations:
+    kargo.akuity.io/color: yellow
+spec:
+  requestedFreight:
+  - origin:
+      kind: Warehouse
+      name: authenticwrite
+    sources:
+      stages:
+        - dev
+  promotionTemplate:
+    spec:
+      steps:
+      - task:
+          name: promote-authenticwrite
+
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: prod
+  namespace: authenticwrite
+  annotations:
+    kargo.akuity.io/color: red
+spec:
+  requestedFreight:
+  - origin:
+      kind: Warehouse
+      name: authenticwrite
+    sources:
+      stages:
+        - staging
+  promotionTemplate:
+    spec:
+      steps:
+      - task:
+          name: promote-authenticwrite
