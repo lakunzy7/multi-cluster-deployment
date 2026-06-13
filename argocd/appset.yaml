@@ -5,20 +5,28 @@ metadata:
   namespace: argocd
 spec:
   generators:
-  - git:
-      repoURL: https://github.com/lakunzy7/multi-cluster-deployment.git
-      revision: HEAD
-      directories:
-      - path: env/*
+  - matrix:
+      generators:
+      - git:
+          repoURL: https://github.com/lakunzy7/multi-cluster-deployment.git
+          revision: HEAD
+          directories:
+          - path: env/*
+      - list:
+          elements:
+          - clusterAlias: local
+            clusterName: in-cluster
+          - clusterAlias: gke
+            clusterName: k8slab-second-cluster
   template:
     metadata:
-      name: authenticwrite-{{path.basename}}
+      name: authenticwrite-{{path.basename}}-{{clusterAlias}}
       annotations:
         kargo.akuity.io/authorized-stage: authenticwrite:{{path.basename}}
     spec:
       destination:
         namespace: authenticwrite-{{path.basename}}
-        name: in-cluster
+        name: "{{clusterName}}"
       project: authenticwrite
       source:
         path: charts/authenticwrite

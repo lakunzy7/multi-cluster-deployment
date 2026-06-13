@@ -45,4 +45,5 @@ spec:
         - uses: argocd-update
           config:
               apps:
-                  - name: authenticwrite-${{ ctx.stage }}
+                  - name: authenticwrite-${{ ctx.stage }}-local
+                  - name: authenticwrite-${{ ctx.stage }}-gke
