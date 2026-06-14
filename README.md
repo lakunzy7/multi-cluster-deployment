@@ -1,194 +1,221 @@
-# AuthenticWrite — Multi-Cluster Kubernetes Deployment Guide
+# AuthenticWrite — Multi-Cluster Kubernetes Deployment
 
-## Overview
+Deploy the **AuthenticWrite** app (backend + frontend) across **two Kubernetes
+clusters** using **GitOps**. ArgoCD keeps the clusters matching Git; Kargo
+promotes images through a `dev → staging → prod` pipeline.
 
-This repository deploys **AuthenticWrite** (backend + frontend) across multiple Kubernetes clusters using **ArgoCD** for GitOps sync and **Kargo** for image promotion through a `dev → staging → prod` pipeline.
+This root README is the **A-to-Z walkthrough**. Each folder has its own deep-dive
+README — this page tells you the order to read them and run them in.
 
-## Features
+---
 
-* Warehouse monitoring GHCR for new backend and frontend images
-* Three-stage promotion pipeline: dev → staging → prod
-* Automatic image tag updates committed back to Git
-* Helm-based deployment with per-environment value overrides
-* ArgoCD ApplicationSet generates apps for each environment automatically
+## What you'll build
+
+```
+                ┌──────────────── LOCAL cluster (Kind/k3s) ────────────────┐
+                │  ArgoCD ─── watches Git, syncs both clusters             │
+   Git repo ───►│  Kargo  ─── promotes images, writes tags back to Git     │──► GKE cluster
+   (this repo)  │  Sealed Secrets ─── stores the GKE access token safely   │    (Terraform)
+                └──────────────────────────────────────────────────────────┘
+                        deploys to        deploys to
+                        "in-cluster"      "k8slab-second-cluster"
+```
+
+- **Two clusters:** a **local** cluster (runs ArgoCD + Kargo + a copy of the app)
+  and a **GKE** cluster (a second deploy target).
+- **Three environments** per cluster: `dev`, `staging`, `prod` — so the
+  ApplicationSet generates **6 deployments** (3 envs × 2 clusters).
+- **GitOps:** you never `kubectl apply` the app. You change Git; ArgoCD deploys.
+- **Promotion:** Kargo detects new images, and on promotion writes the new tag
+  into Git, which ArgoCD then rolls out.
+
+---
+
+## The folder guides (read in this order)
+
+| Order | Folder | What it teaches |
+|-------|--------|-----------------|
+| 1 | [`terraform/`](terraform/README.md) | Create the **local cluster** and the **GKE cluster** (Terraform). |
+| 2 | [`helm/`](helm/README.md) | Install **ArgoCD** + **Kargo** with Helm, and **register the GKE cluster** into ArgoCD. |
+| 3 | [`argocd/`](argocd/README.md) | The **AppProject** + **ApplicationSet** that generate the 6 apps. |
+| 4 | [`kargo/`](kargo/README.md) | The **promotion pipeline** (Warehouse → Stages → PromotionTask) + git credentials. |
+| 5 | [`charts/authenticwrite/`](charts/authenticwrite/README.md) | The **Helm chart** for the app (backend + frontend). |
+| 6 | [`env/`](env/README.md) | The **per-environment** value overrides (replicas, tags). |
+
+---
 
 ## Requirements
 
-* Kargo v1.3+ installed and accessible
-* ArgoCD v2.8+ installed
-* kubectl configured with cluster access
-* kargo CLI installed and matching server version
-* GitHub account with GHCR images set to public
-* GitHub Personal Access Token (PAT) with `repo` scope
+Install these CLIs locally first:
 
-## Quick Start
+| Tool | Why | Check |
+|------|-----|-------|
+| `terraform` (≥1.0) | Builds the GKE cluster | `terraform -version` |
+| `gcloud` + `gke-gcloud-auth-plugin` | GCP auth, kubectl→GKE | `gcloud version` |
+| `kubectl` | Talk to both clusters | `kubectl version --client` |
+| `helm` (≥3) | Install ArgoCD/Kargo | `helm version` |
+| `kind` (or k3s/minikube) | The local cluster | `kind version` |
+| `kargo` CLI (v1.3+) | Manage promotions | `kargo version` |
+| `kubeseal` | Encrypt the GKE cluster token | `kubeseal --version` |
 
-### Step 1 — Prerequisites Check
+You also need:
+- A **GCP project** with billing enabled.
+- A **GitHub Personal Access Token (PAT)** with `repo` scope.
+- Both GHCR images set to **public**: https://github.com/lakunzy7?tab=packages
+
+---
+
+## A-to-Z deployment
+
+Each step below is a summary — follow the linked folder README for the details.
+
+### Step 1 — Create the clusters → [`terraform/`](terraform/README.md)
 
 ```bash
-# Verify kubectl access
-kubectl config get-contexts
+# Local cluster (control plane home)
+kind create cluster --name cloudopshub-local
 
-# Verify ArgoCD is running
-kubectl get pods -n argocd | head -5
+# GKE cluster (second target) via Terraform
+cd terraform
+cp terraform.tfvars.example terraform.tfvars   # set gcp_project
+terraform init && terraform apply              # type 'yes'
 
-# Verify Kargo is running
-kubectl get pods -n kargo | head -5
+# Wire kubectl to GKE (Terraform prints this exact command)
+gcloud container clusters get-credentials cloud-cluster \
+  --zone europe-west1-b --project YOUR_GCP_PROJECT_ID
+cd ..
 
-# Verify kargo CLI
-kargo version
+kubectl config get-contexts        # you should now have BOTH clusters
 ```
 
-### Step 2 — Port-Forward Kargo API (required for CLI)
-
-The kargo CLI communicates with the Kargo API server. Run this in a separate terminal and keep it open:
+### Step 2 — Install ArgoCD & Kargo → [`helm/`](helm/README.md)
 
 ```bash
-kubectl port-forward -n kargo svc/kargo-api 3100:443
+# ArgoCD
+helm repo add argo https://argoproj.github.io/argo-helm && helm repo update
+helm install argocd argo/argo-cd -f helm/argocd/values.yaml -n argocd --create-namespace
+
+# cert-manager (Kargo prerequisite) then Kargo
+helm repo add jetstack https://charts.jetstack.io && helm repo update
+helm install cert-manager jetstack/cert-manager -n cert-manager --create-namespace --set crds.enabled=true
+helm repo add kargo https://charts.kargo.io && helm repo update
+helm install kargo kargo/kargo -f helm/kargo/values.yaml -n kargo --create-namespace
+
+kubectl get pods -n argocd && kubectl get pods -n kargo
 ```
 
-### Step 3 — Login to Kargo CLI
+### Step 3 — Register the GKE cluster into ArgoCD → [`helm/`](helm/README.md) (Part C)
+
+Install the Sealed Secrets controller, mint a ServiceAccount token in **GKE**,
+fill the `helm/argocd/add-cluster.yaml` template, seal it, and apply the sealed
+output to the **local** cluster:
 
 ```bash
+kubectl apply -f helm/argocd/add-cluster-sealed.yaml
+argocd cluster list      # expect in-cluster AND k8slab-second-cluster
+```
+
+### Step 4 — Open the Kargo CLI connection → [`helm/`](helm/README.md)
+
+```bash
+# Keep this port-forward open in a separate terminal
+kubectl port-forward -n kargo svc/kargo-api 3100:443 --address 0.0.0.0
+
+# Log in (default admin password from helm/kargo/values.yaml)
 kargo login --admin https://localhost:3100 --insecure-skip-tls-verify
 ```
 
-Default admin password is `Admin123` unless changed during installation.
-
-### Step 4 — Apply Kargo Resources
-
-Apply all Kargo manifests at once using the kargo CLI (recommended over `kubectl apply`):
+### Step 5 — Apply the Kargo pipeline → [`kargo/`](kargo/README.md)
 
 ```bash
 kargo apply -f ./kargo/
+kubectl get project,warehouse,stages,promotiontasks -n authenticwrite
 ```
 
-Verify resources are created:
-
-```bash
-kubectl get project -n authenticwrite
-kubectl get warehouse -n authenticwrite
-kubectl get stages -n authenticwrite
-kubectl get promotiontasks -n authenticwrite
-```
-
-### Step 5 — Add Git Credentials to Kargo
-
-Kargo needs write access to this repository to commit image tag updates. Use the kargo CLI with `=` syntax for flags:
+### Step 6 — Give Kargo write access to Git → [`kargo/`](kargo/README.md)
 
 ```bash
 kargo create repo-credentials github-creds \
   --project=authenticwrite \
   --git \
-  --username=<your-github-username> \
+  --username=lakunzy7 \
   --repo-url=https://github.com/lakunzy7/multi-cluster-deployment.git \
-  --password=<your-github-pat>
-```
+  --password=YOUR_GITHUB_PAT
 
-Or as a single line:
-
-```bash
-kargo create repo-credentials github-creds --project=authenticwrite --git --username=lakunzy7 --repo-url=https://github.com/lakunzy7/multi-cluster-deployment.git --password=YOUR_PAT
-```
-
-Your PAT must have `repo` scope (read + write). Generate at: **GitHub → Settings → Developer settings → Personal access tokens**.
-
-Verify the credential was created:
-
-```bash
 kubectl get secret github-creds -n authenticwrite --show-labels
 ```
 
-### Step 6 — Apply ArgoCD Resources
+> The kargo CLI needs **`=` flag syntax** and the **port-forward open**. See
+> [Important Notes](#important-notes).
+
+### Step 7 — Apply the ArgoCD apps → [`argocd/`](argocd/README.md)
 
 ```bash
-kubectl apply -f ./argocd/appproj.yaml
-kubectl apply -f ./argocd/appset.yaml
-```
-
-Verify ArgoCD applications are created:
-
-```bash
+kubectl apply -f argocd/appproj.yaml
+kubectl apply -f argocd/appset.yaml
 kubectl get applications -n argocd | grep authenticwrite
 ```
 
-Expected output (`OutOfSync`/`Missing` is normal before first promotion):
+`OutOfSync` / `Missing` before the first promotion is **normal**.
 
-```
-authenticwrite-dev       OutOfSync     Missing
-authenticwrite-staging   OutOfSync     Missing
-authenticwrite-prod      OutOfSync     Missing
-```
-
-### Step 7 — Verify Warehouse Detected Images
-
-Check that Kargo has detected freight (images) from GHCR:
+### Step 8 — Confirm Kargo found the images → [`kargo/`](kargo/README.md)
 
 ```bash
 kubectl get freight -n authenticwrite
-```
-
-If empty, your images may not be public. Make sure both packages are set to public on GitHub: https://github.com/lakunzy7?tab=packages
-
-To manually trigger a warehouse refresh:
-
-```bash
+# Empty? Your GHCR images probably aren't public. Then refresh:
 kubectl annotate warehouse authenticwrite -n authenticwrite kargo.akuity.io/refresh=true
 ```
 
-### Step 8 — Promote Through the Pipeline
+### Step 9 — Promote dev → staging → prod → [`kargo/`](kargo/README.md)
 
-**Via Kargo UI**
-
-1. Open the Kargo UI: http://localhost:3100
-2. Navigate to the `authenticwrite` project
-3. Click the target icon to the left of the dev stage
-4. Select the detected freight and click **Yes** to promote
-5. Once dev succeeds, repeat for staging then prod
-
-**Via CLI**
+Use the **Kargo UI** (http://localhost:3100 → authenticwrite → click the target
+icon on `dev` → pick Freight → confirm), then repeat for staging and prod. Watch:
 
 ```bash
-# Watch promotion status
 kubectl get promotions -n authenticwrite -w
 ```
 
-## Deployment Pipeline
+Each promotion writes a new image tag into [`env/<stage>/values.yaml`](env/README.md),
+which ArgoCD then deploys to **both** clusters.
 
-The full promotion flow from image build to deployment:
+### Step 10 — Reach the running app → [`charts/`](charts/authenticwrite/README.md)
+
+```bash
+kubectl port-forward -n authenticwrite-dev svc/frontend 8080:80   --address 0.0.0.0
+kubectl port-forward -n authenticwrite-dev svc/backend  5000:5000 --address 0.0.0.0
+```
+
+---
+
+## The promotion pipeline (how it flows)
 
 ```
-1. CI builds backend/frontend images → pushes to ghcr.io
-   ↓
-2. Kargo Warehouse detects new image tags
-   ↓
-3. Freight is created containing the new image references
-   ↓
-4. User promotes Freight: dev → staging → prod
-   ↓
-5. PromotionTask runs per stage:
-   - git-clone: clones this repo
-   - yaml-update: writes new image tags to env/{stage}/values.yaml
-   - git-commit: commits the change
-   - git-push: pushes back to GitHub (uses registered credentials)
-   - argocd-update: triggers ArgoCD sync
-   ↓
-6. ArgoCD syncs updated Helm values to the cluster
-   ↓
-7. New images are deployed to the environment
+1. CI builds backend/frontend images → pushes to ghcr.io  (tag = git short SHA)
+2. Kargo Warehouse detects the new tags → creates Freight
+3. You promote Freight: dev → staging → prod
+4. PromotionTask runs per stage:
+     git-clone → yaml-update(backend) → yaml-update(frontend)
+              → git-commit → git-push → argocd-update
+5. Git now has the new tag in env/<stage>/values.yaml
+6. ArgoCD syncs charts/authenticwrite (with that values file) to BOTH clusters
+7. New pods running in authenticwrite-<stage> on local + GKE
 ```
 
 ### Stages
 
-| Stage | Namespace | Replicas | Approval | Description |
-|-------|-----------|----------|----------|-------------|
-| **dev** | authenticwrite-dev | 1 | Manual | Development environment |
-| **staging** | authenticwrite-staging | 2 | Manual | Pre-production testing |
-| **prod** | authenticwrite-prod | 3 | Manual | Production deployment |
+| Stage | Namespace | Replicas | Source of Freight | Approval |
+|-------|-----------|----------|-------------------|----------|
+| **dev** | authenticwrite-dev | 1 | Warehouse (direct) | Manual |
+| **staging** | authenticwrite-staging | 2 | dev | Manual |
+| **prod** | authenticwrite-prod | 3 | staging | Manual |
+
+---
 
 ## Port Forwards & Firewall
 
-All in-cluster services are `ClusterIP` (internal only). To reach them from outside the VM, port-forward to a local port with `--address 0.0.0.0`, then open the matching GCP firewall rule. The table below lists every port used by this project (app + tooling) and its firewall status.
+All in-cluster services are `ClusterIP` (internal only). To reach them from
+outside the VM, port-forward with `--address 0.0.0.0`, then open the matching GCP
+firewall rule.
 
 | Service | Local Port | Firewall Rule | Access URL |
 |---------|-----------|---------------|------------|
@@ -203,25 +230,12 @@ All in-cluster services are `ClusterIP` (internal only). To reach them from outs
 ### Port-Forward Commands
 
 ```bash
-# Frontend (app)
 kubectl port-forward -n authenticwrite-dev svc/frontend 8080:80 --address 0.0.0.0
-
-# Backend (app)
 kubectl port-forward -n authenticwrite-dev svc/backend 5000:5000 --address 0.0.0.0
-
-# ArgoCD UI
 kubectl port-forward -n argocd svc/argocd-server 8081:80 --address 0.0.0.0
-
-# Kargo UI + CLI
 kubectl port-forward -n kargo svc/kargo-api 3100:443 --address 0.0.0.0
-
-# Grafana
 kubectl port-forward -n monitoring svc/kube-prometheus-stack-grafana 3000:80 --address 0.0.0.0
-
-# Prometheus
 kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090 --address 0.0.0.0
-
-# Alertmanager
 kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9093 --address 0.0.0.0
 ```
 
@@ -234,169 +248,102 @@ gcloud compute firewall-rules create allow-<name> \
   --description="<purpose>"
 ```
 
-> **Security note:** `--source-ranges=0.0.0.0/0` exposes the port to the entire internet — acceptable for short-lived demos. For anything longer-lived, restrict to your own IP (e.g. `--source-ranges=YOUR_IP/32`), since ArgoCD/Kargo/Grafana login pages would otherwise be publicly reachable.
+> **Security note:** `--source-ranges=0.0.0.0/0` exposes the port to the entire
+> internet — fine for short demos. For anything longer-lived, restrict to your
+> own IP (`--source-ranges=YOUR_IP/32`), since ArgoCD/Kargo/Grafana login pages
+> would otherwise be publicly reachable.
+
+---
 
 ## Important Notes
 
 ### PromotionTask: No Inline Credentials
-
-In Kargo v1.3+, the `git-clone` and `git-push` steps do **NOT** support inline credentials config. The `credentials` block inside step config will cause promotion to fail with:
-
-```
-invalid git-clone config: (root): Additional property credentials is not allowed
-```
-
-Credentials must be registered at the project level using `kargo create repo-credentials` (Step 5 above). Kargo automatically injects them for all Git operations in the project namespace.
+In Kargo v1.3+, `git-clone`/`git-push` steps do **not** accept an inline
+`credentials` block — it fails with `Additional property credentials is not
+allowed`. Register credentials at the project level with
+`kargo create repo-credentials` (Step 6).
 
 ### kargo CLI Flag Syntax
-
-The kargo CLI requires `=` between flag names and values. Space-separated values will fail:
-
-```bash
-# WRONG - will fail
-kargo create repo-credentials --project authenticwrite --username lakunzy7
-
-# CORRECT
-kargo create repo-credentials --project=authenticwrite --username=lakunzy7
-```
+Use `=` between flag and value: `--project=authenticwrite`, **not**
+`--project authenticwrite`.
 
 ### Port-Forward Must Stay Open
-
-The kargo CLI requires the port-forward to be active. If you get `connection refused`, restart it:
-
-```bash
-kubectl port-forward -n kargo svc/kargo-api 3100:443
-```
+The kargo CLI talks to the API over the port-forward. If you get `connection
+refused`, restart `kubectl port-forward -n kargo svc/kargo-api 3100:443`.
 
 ### GHCR Images Must Be Public
+The Warehouse can't discover images from private GHCR packages. Set both packages
+to public at https://github.com/lakunzy7?tab=packages.
 
-The Kargo Warehouse cannot discover images from private GHCR repositories without image pull credentials. Set both packages to public:
-
-* Go to https://github.com/lakunzy7?tab=packages
-* Click each package → Package settings → Change visibility → Public
+---
 
 ## Directory Structure
 
 ```
 .
-├── README.md
-├── argocd/
-│   ├── appproj.yaml        # ArgoCD Project (security boundary)
-│   └── appset.yaml         # ApplicationSet (generates 3 Applications)
-├── kargo/
-│   ├── project.yaml        # Kargo Project (creates namespace)
-│   ├── warehouse.yaml      # Monitors ghcr.io for new images
-│   ├── stages.yaml         # dev, staging, prod stage definitions
-│   └── promotiontask.yaml  # Git clone → update → commit → push → sync
-├── charts/
-│   └── authenticwrite/     # Helm chart (templates + base values)
-├── env/
-│   ├── dev/values.yaml     # Dev overrides (1 replica)
-│   ├── staging/values.yaml # Staging overrides (2 replicas)
-│   └── prod/values.yaml    # Prod overrides (3 replicas)
-├── helm/                   # ArgoCD + Kargo installation values
-└── terraform/              # GKE infrastructure
+├── README.md                  # ← you are here (A-Z guide + reference)
+├── terraform/                 # GKE + VPC infrastructure        → terraform/README.md
+├── helm/                      # ArgoCD + Kargo install values    → helm/README.md
+│   ├── argocd/                #   + add-cluster (Sealed Secret)
+│   └── kargo/
+├── argocd/                    # AppProject + ApplicationSet      → argocd/README.md
+├── kargo/                     # Project/Warehouse/Stages/Task    → kargo/README.md
+├── charts/authenticwrite/     # The app's Helm chart             → charts/authenticwrite/README.md
+└── env/                       # Per-env overrides (dev/stg/prod) → env/README.md
 ```
+
+---
 
 ## Useful Commands
 
-### View Status
-
 ```bash
-# All ArgoCD applications
+# ArgoCD apps
 kubectl get applications -n argocd | grep authenticwrite
 
 # Kargo pipeline state
-kubectl get stages -n authenticwrite
-kubectl get freight -n authenticwrite
-kubectl get promotions -n authenticwrite
+kubectl get stages,freight,promotions -n authenticwrite
 
-# Pod status per environment
+# Pods per environment
 kubectl get pods -n authenticwrite-dev
 kubectl get pods -n authenticwrite-staging
 kubectl get pods -n authenticwrite-prod
-```
 
-### Simulate a New Release
+# Logs
+kubectl logs -n authenticwrite-dev deployment/backend -f
+kubectl logs -n authenticwrite-dev deployment/frontend -f
+kubectl logs -n kargo deployment/kargo-controller -f
+kubectl logs -n argocd deployment/argocd-application-controller -f
 
-To test the pipeline with a new image tag, push a new tag to GHCR, then refresh the warehouse:
-
-```bash
-# Refresh warehouse to detect new images
+# Simulate a new release
 kubectl annotate warehouse authenticwrite -n authenticwrite kargo.akuity.io/refresh=true
-
-# Watch for new freight
 kubectl get freight -n authenticwrite -w
 ```
 
-### View Logs
-
-```bash
-# Backend logs
-kubectl logs -n authenticwrite-dev deployment/backend -f
-
-# Frontend logs
-kubectl logs -n authenticwrite-dev deployment/frontend -f
-
-# Kargo controller logs
-kubectl logs -n kargo deployment/kargo-controller -f
-
-# ArgoCD controller logs
-kubectl logs -n argocd deployment/argocd-application-controller -f
-```
+---
 
 ## Troubleshooting
 
-### Promotion fails with `Additional property credentials is not allowed`
+| Symptom | Where | Fix |
+|---------|-------|-----|
+| `Additional property credentials is not allowed` | [kargo](kargo/README.md) | Remove `credentials` from git steps; use `kargo create repo-credentials`. |
+| git-push: `could not read Username` | [kargo](kargo/README.md) | `github-creds` Secret missing/mislabelled — re-run Step 6; needs label `kargo.akuity.io/cred-type=git`. |
+| kargo CLI `connection refused` | [helm](helm/README.md) | Port-forward to `kargo-api` isn't running. |
+| kargo CLI `token expired` | [helm](helm/README.md) | `kargo login --admin https://localhost:3100 --insecure-skip-tls-verify`. |
+| Warehouse shows no freight | [kargo](kargo/README.md) | Images not public, or tag doesn't match `^[0-9a-f]{8}$`. Make public + refresh. |
+| Apps stuck `OutOfSync/Missing` | [argocd](argocd/README.md) | Normal before first promotion; or force-sync the app. |
+| GKE cluster missing in ArgoCD | [helm](helm/README.md) | Sealed Secret not applied/decrypted — see Part C. |
+| Kargo pods crashloop on install | [helm](helm/README.md) | cert-manager wasn't ready first — install it, wait, reinstall Kargo. |
 
-Remove any `credentials` block from `git-clone` or `git-push` steps in `promotiontask.yaml`. Register credentials using `kargo create repo-credentials` instead (see Step 5).
-
-### git-push fails with `could not read Username`
-
-The project-level credential secret is missing or not labelled correctly. Verify:
-
-```bash
-kubectl get secret github-creds -n authenticwrite --show-labels
-# Should show label: kargo.akuity.io/cred-type=git
-```
-
-If missing, re-run Step 5 to recreate using `kargo create repo-credentials`.
-
-### kargo CLI: `connection refused`
-
-The port-forward is not running. Open a new terminal and run:
-
-```bash
-kubectl port-forward -n kargo svc/kargo-api 3100:443
-```
-
-### kargo CLI: `token expired`
-
-```bash
-kargo login --admin https://localhost:3100 --insecure-skip-tls-verify
-```
-
-### Warehouse shows no freight
-
-* Ensure both GHCR images are set to public
-* Check the `allowTags` regex matches your image tag format
-* Manually refresh: `kubectl annotate warehouse authenticwrite -n authenticwrite kargo.akuity.io/refresh=true`
-
-### ArgoCD apps stuck in OutOfSync/Missing
-
-This is expected before the first promotion. Once you promote to a stage, ArgoCD will sync automatically. You can also force sync:
-
-```bash
-kubectl patch application authenticwrite-dev -n argocd --type merge -p '{"operation":{"sync":{}}}'
-```
+---
 
 ## References
 
-* Kargo Documentation: https://kargo.akuity.io
-* ArgoCD Documentation: https://argo-cd.readthedocs.io
-* Helm Documentation: https://helm.sh/docs
+* Kargo: https://kargo.akuity.io
+* ArgoCD: https://argo-cd.readthedocs.io
+* Helm: https://helm.sh/docs
+* Sealed Secrets: https://github.com/bitnami-labs/sealed-secrets
 * GHCR Packages: https://github.com/lakunzy7?tab=packages
 
 ---
 
-**Status**: Production Ready ✅
+**Status:** Production Ready ✅
