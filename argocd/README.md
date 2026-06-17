@@ -11,8 +11,8 @@ argocd/
 └── appset.yaml    # ApplicationSet — auto-generates one Application per (env × cluster)
 ```
 
-Apply them **after** ArgoCD is installed (see `../helm/README.md`) and the GKE
-cluster is registered:
+Apply them **after** ArgoCD is installed (see `../helm/README.md`) and cluster 2
+is registered:
 
 ```bash
 kubectl apply -f argocd/appproj.yaml
@@ -75,23 +75,26 @@ This scans the repo and yields one item per folder under `env/` →
 ```yaml
 - list:
     elements:
-    - clusterAlias: local
-      clusterName: in-cluster              # the local cluster (ArgoCD lives here)
-    - clusterAlias: gke
-      clusterName: k8slab-second-cluster   # the GKE cluster (registered via Sealed Secret)
+    - clusterAlias: cluster1
+      clusterName: in-cluster              # cluster 1 — ArgoCD lives here
+    - clusterAlias: cluster2
+      clusterName: k8slab-second-cluster   # cluster 2 (registered via Sealed Secret)
 ```
 
 `clusterName` must match an ArgoCD **registered cluster** name. `in-cluster` is
 built in; `k8slab-second-cluster` is the one you added in `../helm/README.md`.
+`clusterAlias` is just a cosmetic label that becomes part of the app name — it is
+**not** referenced anywhere else (Kargo selects apps by label, not by this name —
+see Section 3), so you can rename it freely or add more list entries.
 
 ### The matrix → 6 Applications
 
 3 environments × 2 clusters = **6 Applications**:
 
 ```
-authenticwrite-dev-local        authenticwrite-dev-gke
-authenticwrite-staging-local    authenticwrite-staging-gke
-authenticwrite-prod-local       authenticwrite-prod-gke
+authenticwrite-dev-cluster1        authenticwrite-dev-cluster2
+authenticwrite-staging-cluster1    authenticwrite-staging-cluster2
+authenticwrite-prod-cluster1       authenticwrite-prod-cluster2
 ```
 
 ### The template — what each generated Application looks like
@@ -100,6 +103,8 @@ authenticwrite-prod-local       authenticwrite-prod-gke
 template:
   metadata:
     name: authenticwrite-{{path.basename}}-{{clusterAlias}}
+    labels:
+      stage: "{{path.basename}}"                                          # (A)
     annotations:
       kargo.akuity.io/authorized-stage: authenticwrite:{{path.basename}}   # (A)
   spec:
@@ -117,9 +122,13 @@ template:
 
 Two things to notice:
 
-- **(A) `kargo.akuity.io/authorized-stage`** — this annotation gives Kargo
-  permission to trigger a sync of this Application for the matching stage. It's
-  the handshake that lets Kargo and ArgoCD cooperate (see below).
+- **(A) The `stage` label + `kargo.akuity.io/authorized-stage` annotation** —
+  together these are the handshake with Kargo. The **annotation** gives Kargo
+  permission to trigger a sync for the matching stage; the **label** is how
+  Kargo *finds* the apps to sync — its `argocd-update` step selects by
+  `matchLabels: {stage: <stage>}` rather than naming each app (see Section 3).
+  This is what lets you add/rename clusters in the `list` above without touching
+  the Kargo PromotionTask.
 - **(B) `valueFiles`** — each Application renders the **same chart**
   (`charts/authenticwrite`) but layers the environment's override file on top
   (`env/dev/values.yaml`, etc.). That's how dev gets 1 replica and prod gets 3.
@@ -146,10 +155,13 @@ They have **separate jobs** and meet in Git:
 3. ArgoCD renders `charts/authenticwrite` with the updated values file and applies
    it to **both** clusters for that environment.
 
-The `argocd-update` step in `../kargo/promotiontask.yaml` targets the app names
-`authenticwrite-<stage>-local` and `authenticwrite-<stage>-gke` — exactly the
-names this ApplicationSet generates. And it's allowed to do so because of the
-`authorized-stage` annotation in the template.
+The `argocd-update` step in `../kargo/promotiontask.yaml` selects apps by the
+**`stage` label** (`matchLabels: {stage: <stage>}`) that this ApplicationSet
+stamps on every generated app — so it nudges *all* clusters for that stage at
+once, regardless of how many clusters or what they're named. And it's allowed to
+do so because of the `authorized-stage` annotation in the template. (Earlier this
+step listed app names like `authenticwrite-<stage>-local` literally; the label
+selector replaces that so cluster changes only touch `appset.yaml`.)
 
 ---
 
@@ -163,7 +175,7 @@ kubectl get applications -n argocd | grep authenticwrite
 # because env/*/values.yaml may not yet have a real image tag deployed.
 
 # Force a sync manually if needed
-kubectl patch application authenticwrite-dev-local -n argocd \
+kubectl patch application authenticwrite-dev-cluster1 -n argocd \
   --type merge -p '{"operation":{"sync":{}}}'
 ```
 
@@ -178,7 +190,7 @@ of the 6 apps to see the live resource tree, diffs, and sync history.
 |---------|-----|
 | Only 3 apps generated, not 6 | The cluster `list` generator or a `clusterName` is wrong — confirm both clusters are registered (`argocd cluster list`). |
 | App stuck `OutOfSync/Missing` | Expected before first promotion. Promote via Kargo, or force-sync (above). |
-| `cluster "k8slab-second-cluster" not found` | The GKE cluster Secret isn't applied/decrypted — see `../helm/README.md` Part C. |
+| `cluster "k8slab-second-cluster" not found` | The cluster 2 Secret isn't applied/decrypted — see `../helm/README.md` Part C. |
 | App can't deploy — destination not permitted | The namespace isn't `authenticwrite-*`, which the AppProject forbids. |
 
 ---

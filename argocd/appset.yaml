@@ -14,13 +14,15 @@ spec:
           - path: env/*
       - list:
           elements:
-          - clusterAlias: local
+          - clusterAlias: cluster1
             clusterName: in-cluster
-          - clusterAlias: gke
+          - clusterAlias: cluster2
             clusterName: k8slab-second-cluster
   template:
     metadata:
       name: authenticwrite-{{path.basename}}-{{clusterAlias}}
+      labels:
+        stage: "{{path.basename}}"
       annotations:
         kargo.akuity.io/authorized-stage: authenticwrite:{{path.basename}}
     spec:
