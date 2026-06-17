@@ -156,12 +156,34 @@ it's encrypted with **Sealed Secrets** and committed as `add-cluster-sealed.yaml
 ### Step 1 — Install the Sealed Secrets controller (cluster 1, once)
 
 ```bash
-helm repo add sealed-secrets https://bitnami-labs.github.io/sealed-secrets
+helm repo add sealed-secrets https://bitnami.github.io/sealed-secrets
 helm repo update
 helm install sealed-secrets sealed-secrets/sealed-secrets \
   -n sealed-secrets --create-namespace
-# install the kubeseal CLI too (matches the controller version)
+
+# Confirm the controller is up and note its version
+kubectl get pods -n sealed-secrets
+kubectl get deployment sealed-secrets -n sealed-secrets \
+  -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
 ```
+
+#### Install the `kubeseal` CLI (match the controller version)
+
+`kubeseal` encrypts secrets against the controller's public key (used in Step 4).
+Pin the same version as the controller you just installed (e.g. `0.37.0`):
+
+```bash
+KUBESEAL_VERSION=0.37.0
+curl -OL "https://github.com/bitnami-labs/sealed-secrets/releases/download/v${KUBESEAL_VERSION}/kubeseal-${KUBESEAL_VERSION}-linux-amd64.tar.gz"
+tar -xzf "kubeseal-${KUBESEAL_VERSION}-linux-amd64.tar.gz" kubeseal
+sudo install -m 755 kubeseal /usr/local/bin/kubeseal
+rm -f kubeseal "kubeseal-${KUBESEAL_VERSION}-linux-amd64.tar.gz"
+
+kubeseal --version   # should print: kubeseal version: 0.37.0
+```
+
+> On macOS you can instead `brew install kubeseal`. For other releases see
+> https://github.com/bitnami-labs/sealed-secrets/releases
 
 ### Step 2 — Create a ServiceAccount + token in cluster 2
 
