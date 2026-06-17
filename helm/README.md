@@ -98,6 +98,27 @@ kubectl port-forward -n argocd svc/argocd-server 8081:80 --address 0.0.0.0
 # UI: https://localhost:8081  (user: admin)
 ```
 
+### Install the `argocd` CLI (optional, used to verify clusters in Part C)
+
+The web UI is enough for everything here, but the CLI is handy for
+`argocd cluster list` / `argocd app` checks.
+
+```bash
+# Linux (amd64) — grabs the latest release
+curl -sSL -o /tmp/argocd \
+  https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+sudo install -m 555 /tmp/argocd /usr/local/bin/argocd
+rm -f /tmp/argocd
+argocd version --client
+
+# Log in through the port-forward above (admin password: see the box just above)
+argocd login localhost:8081 --username admin --password <ADMIN_PASSWORD> \
+  --insecure --grpc-web
+```
+
+> On macOS you can instead `brew install argocd`. Other platforms:
+> https://github.com/argoproj/argo-cd/releases
+
 ---
 
 ## Part B — Install Kargo
@@ -280,6 +301,9 @@ stringData:
 > "tlsClientConfig": { "insecure": false, "caData": "<BASE64 CA FROM STEP 2>" }
 > ```
 
+Save this filled-in copy somewhere **outside the repo** (it holds the real
+token) — e.g. `/tmp/add-cluster-filled.yaml`, which is what Step 4 seals.
+
 ### Step 4 — Seal it (encrypt)
 
 Point kubectl back at **cluster 1** (where the Sealed Secrets controller
@@ -307,14 +331,30 @@ kubectl --context=cluster-1 apply -f helm/argocd/add-cluster-sealed.yaml
 
 The Sealed Secrets controller decrypts it into a normal `Secret` labelled
 `argocd.argoproj.io/secret-type: cluster`. ArgoCD picks it up automatically.
+Confirm the decryption worked:
+
+```bash
+kubectl --context=cluster-1 get secret k8slab-second-cluster -n argocd --show-labels
+# expect a Secret with label: argocd.argoproj.io/secret-type=cluster
+```
 
 ### Step 6 — Verify ArgoCD sees both clusters
 
+In the ArgoCD UI: **Settings → Clusters**, OR via CLI. With the argocd-server
+port-forward open (e.g. on `8080` via k9s, or `8081` from Part A), log in and
+list — this lab needs the `--grpc-web` flag:
+
 ```bash
-# In the ArgoCD UI: Settings → Clusters, OR via CLI:
-argocd cluster list
-# Expect: in-cluster (cluster 1) AND k8slab-second-cluster (cluster 2)
+argocd login localhost:8080 --username admin --password <ADMIN_PASSWORD> \
+  --insecure --grpc-web
+argocd cluster list --grpc-web
+# Expect: in-cluster (cluster 1) AND k8slab-second-cluster -> https://172.17.0.4:6443
 ```
+
+> A freshly-registered cluster shows **STATUS: Unknown — "Cluster has no
+> applications and is not being monitored."** That is **expected**, not an error:
+> ArgoCD only opens a live connection once an Application actually targets the
+> cluster. It turns healthy after your first app deploys there.
 
 ---
 
