@@ -1,16 +1,16 @@
 # Helm — Installing ArgoCD & Kargo, and Adding the 2nd Cluster
 
 This folder holds the **Helm values** used to install the two control-plane
-tools, plus the manifests that **register the GKE cluster into ArgoCD** so
+tools, plus the manifests that **register cluster 2 into ArgoCD** so
 ArgoCD can deploy to both clusters.
 
-Everything here runs against your **local cluster** (the one ArgoCD/Kargo live in).
+Everything here runs against **cluster 1** (the one ArgoCD/Kargo live in).
 
 ```
 helm/
 ├── argocd/
 │   ├── values.yaml             # Helm values for the ArgoCD install
-│   ├── add-cluster.yaml        # TEMPLATE secret to register the GKE cluster (no real secrets)
+│   ├── add-cluster.yaml        # TEMPLATE secret to register cluster 2 (no real secrets)
 │   └── add-cluster-sealed.yaml # The ENCRYPTED version of that secret (safe to commit)
 └── kargo/
     └── values.yaml             # Helm values for the Kargo install
@@ -131,14 +131,14 @@ kargo login --admin https://localhost:3100 --insecure-skip-tls-verify
 
 ---
 
-## Part C — Add the GKE cluster to ArgoCD (multi-cluster)
+## Part C — Add cluster 2 to ArgoCD (multi-cluster)
 
-ArgoCD runs in the **local** cluster. It already knows about that one as the
-built-in `in-cluster`. To let it *also* deploy to **GKE**, you register the GKE
-cluster as an ArgoCD "cluster Secret" named **`k8slab-second-cluster`** — the
+ArgoCD runs in **cluster 1**. It already knows about that one as the
+built-in `in-cluster`. To let it *also* deploy to **cluster 2**, you register
+cluster 2 as an ArgoCD "cluster Secret" named **`k8slab-second-cluster`** — the
 same name the ApplicationSet uses (`../argocd/appset.yaml`).
 
-A cluster Secret needs three things from the **GKE** cluster:
+A cluster Secret needs three things from **cluster 2**:
 1. its **API server URL**,
 2. a **bearer token** for a ServiceAccount ArgoCD can use,
 3. the cluster's **CA certificate** (base64).
@@ -153,7 +153,7 @@ it's encrypted with **Sealed Secrets** and committed as `add-cluster-sealed.yaml
 | `add-cluster.yaml` | No — it's a template with `REPLACE_WITH_...` placeholders | Yes (it's harmless) |
 | `add-cluster-sealed.yaml` | Yes, but **encrypted** | Yes (only the controller can decrypt it) |
 
-### Step 1 — Install the Sealed Secrets controller (local cluster, once)
+### Step 1 — Install the Sealed Secrets controller (cluster 1, once)
 
 ```bash
 helm repo add sealed-secrets https://bitnami-labs.github.io/sealed-secrets
@@ -163,10 +163,10 @@ helm install sealed-secrets sealed-secrets/sealed-secrets \
 # install the kubeseal CLI too (matches the controller version)
 ```
 
-### Step 2 — Create a ServiceAccount + token in the GKE cluster
+### Step 2 — Create a ServiceAccount + token in cluster 2
 
-Point kubectl at GKE (`kubectl config use-context <gke-context>`), then create
-a ServiceAccount with cluster-admin and mint a token:
+Point kubectl at cluster 2 (`kubectl config use-context <cluster-2-context>`),
+then create a ServiceAccount with cluster-admin and mint a token:
 
 ```bash
 kubectl create serviceaccount argocd-manager -n kube-system
@@ -196,7 +196,7 @@ Copy the three values into a **filled-in copy** of `add-cluster.yaml`
 
 ### Step 4 — Seal it (encrypt)
 
-Point kubectl back at the **local** cluster (where the Sealed Secrets controller
+Point kubectl back at **cluster 1** (where the Sealed Secrets controller
 lives), then:
 
 ```bash
@@ -209,7 +209,7 @@ kubeseal \
   > helm/argocd/add-cluster-sealed.yaml
 ```
 
-### Step 5 — Apply the sealed secret to the local cluster
+### Step 5 — Apply the sealed secret to cluster 1
 
 ```bash
 kubectl --context=kind-cloudopshub-local apply -f helm/argocd/add-cluster-sealed.yaml
@@ -223,7 +223,7 @@ The Sealed Secrets controller decrypts it into a normal `Secret` labelled
 ```bash
 # In the ArgoCD UI: Settings → Clusters, OR via CLI:
 argocd cluster list
-# Expect: in-cluster (local) AND k8slab-second-cluster (GKE)
+# Expect: in-cluster (cluster 1) AND k8slab-second-cluster (cluster 2)
 ```
 
 ---
@@ -231,10 +231,10 @@ argocd cluster list
 ## How it all fits together
 
 ```
-            ┌──────────────────────── LOCAL cluster ────────────────────────┐
+            ┌──────────────────────── CLUSTER 1 ────────────────────────────┐
             │  ArgoCD  ──────────────┐                                       │
  Git repo ──┤  Kargo                 │ deploys to "in-cluster" (itself)      │
-   (this)   │  Sealed Secrets ctrl   └─ deploys to "k8slab-second-cluster" ──┼──► GKE cluster
+   (this)   │  Sealed Secrets ctrl   └─ deploys to "k8slab-second-cluster" ──┼──► CLUSTER 2
             └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -249,5 +249,5 @@ back to Git. Details: `../argocd/README.md` and `../kargo/README.md`.
 |---------|-----|
 | Kargo pods crashloop right after install | cert-manager wasn't ready first. Install cert-manager, wait, reinstall Kargo. |
 | `kubeseal` can't find the controller | Check `--controller-namespace`/`--controller-name` match your install (`sealed-secrets`). |
-| GKE cluster missing in ArgoCD | The sealed secret didn't decrypt — check the Sealed Secrets controller logs; confirm the `argocd.argoproj.io/secret-type: cluster` label exists on the resulting Secret. |
+| Cluster 2 missing in ArgoCD | The sealed secret didn't decrypt — check the Sealed Secrets controller logs; confirm the `argocd.argoproj.io/secret-type: cluster` label exists on the resulting Secret. |
 | Token expired after a year | Re-run `kubectl create token ...`, re-seal, re-apply. |
