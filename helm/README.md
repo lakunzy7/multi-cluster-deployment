@@ -88,6 +88,12 @@ helm install kargo kargo/kargo \
   -f helm/kargo/values.yaml \
   -n kargo --create-namespace
 
+# 2.1 Kargo (via OCI registry - charts.kargo.io is deprecated)
+helm install kargo oci://ghcr.io/akuity/kargo-charts/kargo \
+  --version 1.10.5 \
+  -f helm/kargo/values.yaml \
+  -n kargo --create-namespace
+
 # 3. Wait for it to come up
 kubectl get pods -n kargo -w
 ```
