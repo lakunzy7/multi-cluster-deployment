@@ -7,9 +7,12 @@
 # How to fill + seal:
 #   1. name/server/bearerToken/caData -> see helm/argocd/add-cluster-guide.md (Step 3)
 #   2. kubeseal --controller-namespace sealed-secrets --controller-name sealed-secrets \
-#        --context kind-cloudopshub-local --format yaml \
+#        --context cluster-1 --format yaml \
 #        < helm/argocd/add-cluster.yaml > helm/argocd/add-cluster-sealed.yaml
-#   3. kubectl --context=kind-cloudopshub-local apply -f helm/argocd/add-cluster-sealed.yaml
+#   3. kubectl --context=cluster-1 apply -f helm/argocd/add-cluster-sealed.yaml
+#
+# NOTE: if the target cluster has no CA cert (e.g. k3s with
+# insecure-skip-tls-verify), drop "caData" and set "insecure": true instead.
 
 apiVersion: v1
 kind: Secret

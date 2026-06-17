@@ -22,6 +22,38 @@ helm/
 
 ---
 
+## The environment used here
+
+This walkthrough was built and tested against a **[floci.io](https://floci.io)
+practice environment** — *not* a real cloud. Concretely:
+
+| Thing | What it actually is in this lab |
+|-------|---------------------------------|
+| Kubernetes distro | **k3s** (Rancher), one per cluster, running as Docker containers |
+| cluster 1 (control plane) | container `floci-eks-cluster-1`, Docker bridge IP `172.17.0.3` |
+| cluster 2 (target) | container `floci-eks-cluster-2`, Docker bridge IP `172.17.0.4` |
+| API server reachability | both on the same Docker `bridge` network, so cluster 1 reaches cluster 2 at `https://172.17.0.4:6443` |
+| TLS | clusters use `insecure-skip-tls-verify` — **no CA cert** to embed |
+| kubectl contexts | renamed to `cluster-1` and `cluster-2` for clarity |
+
+> **The floci EKS-style names are cosmetic.** The containers are named
+> `floci-eks-cluster-*` and the kubeconfig entries carry `arn:aws:eks:...`
+> strings, but there is **no real AWS/EKS** here — it's local k3s. Treat any
+> "EKS"/"GKE" wording as illustrative only.
+
+> ⚠️ **Different Kubernetes environment? These steps will change.** The commands
+> below assume the floci/k3s setup above. On a real cloud (EKS, GKE, AKS) or a
+> different local tool (kind, minikube, k3d) you will need to adjust:
+> - **the cluster 2 API server URL** (a public/private endpoint, not a Docker IP),
+> - **TLS** — real clusters have a CA cert, so you embed `caData` and set
+>   `"insecure": false` instead of the `insecure: true` used here,
+> - **context names**, and possibly the **auth method** (cloud IAM/exec plugin
+>   vs. a ServiceAccount token).
+>
+> Each affected step below has an **"On a different environment"** note.
+
+---
+
 ## Part A — Install ArgoCD
 
 ArgoCD is the **GitOps engine**: it watches this Git repo and makes the cluster
@@ -143,6 +175,11 @@ A cluster Secret needs three things from **cluster 2**:
 2. a **bearer token** for a ServiceAccount ArgoCD can use,
 3. the cluster's **CA certificate** (base64).
 
+In **this floci/k3s lab** item 3 does not exist — the clusters use
+`insecure-skip-tls-verify`, so there is no CA cert. We therefore set
+`"insecure": true` instead of supplying `caData` (see Step 3). On a real cloud
+cluster you *would* embed the CA cert.
+
 Because that token is a real credential, it is **not** committed in plaintext —
 it's encrypted with **Sealed Secrets** and committed as `add-cluster-sealed.yaml`.
 
@@ -187,10 +224,12 @@ kubeseal --version   # should print: kubeseal version: 0.37.0
 
 ### Step 2 — Create a ServiceAccount + token in cluster 2
 
-Point kubectl at cluster 2 (`kubectl config use-context <cluster-2-context>`),
-then create a ServiceAccount with cluster-admin and mint a token:
+Point kubectl at cluster 2, then create a ServiceAccount with cluster-admin and
+mint a token (in this lab the context is named `cluster-2`):
 
 ```bash
+kubectl config use-context cluster-2
+
 kubectl create serviceaccount argocd-manager -n kube-system
 kubectl create clusterrolebinding argocd-manager \
   --clusterrole=cluster-admin \
@@ -200,21 +239,46 @@ kubectl create clusterrolebinding argocd-manager \
 kubectl create token argocd-manager -n kube-system --duration=8760h
 ```
 
-Gather the three values:
+Gather the values:
 
 ```bash
-# Server URL
-kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}'
+# Server URL — in this lab: https://172.17.0.4:6443 (cluster 2's Docker bridge IP)
+kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}'; echo
 
-# CA data (already base64 in kubeconfig)
+# CA data — EMPTY in this lab (k3s uses insecure-skip-tls-verify, no CA cert)
 kubectl config view --raw --minify \
-  -o jsonpath='{.clusters[0].cluster.certificate-authority-data}'
+  -o jsonpath='{.clusters[0].cluster.certificate-authority-data}'; echo
 ```
+
+> **On a different environment:** the server URL will be the cluster's real API
+> endpoint (e.g. an EKS/GKE public endpoint), and the CA command will return a
+> real base64 cert — keep it for Step 3 and set `"insecure": false`. Cloud
+> clusters may also use an IAM/exec-plugin login rather than this SA token;
+> the SA-token approach here works on any cluster you have admin on.
 
 ### Step 3 — Fill in the template
 
-Copy the three values into a **filled-in copy** of `add-cluster.yaml`
-(`server`, `bearerToken`, `caData`). Do **not** commit this filled-in file.
+Copy the values into a **filled-in copy** of `add-cluster.yaml`. Do **not**
+commit this filled-in file. In **this floci/k3s lab** there is no CA cert, so the
+`stringData` looks like this (note `"insecure": true` and **no** `caData`):
+
+```yaml
+stringData:
+  name: k8slab-second-cluster
+  server: https://172.17.0.4:6443        # cluster 2's Docker bridge IP
+  config: |
+    {
+      "bearerToken": "<TOKEN FROM STEP 2>",
+      "tlsClientConfig": { "insecure": true }
+    }
+```
+
+> **On a different environment (cluster *has* a CA cert):** keep `caData` and set
+> `insecure` to `false` instead:
+>
+> ```json
+> "tlsClientConfig": { "insecure": false, "caData": "<BASE64 CA FROM STEP 2>" }
+> ```
 
 ### Step 4 — Seal it (encrypt)
 
@@ -222,19 +286,23 @@ Point kubectl back at **cluster 1** (where the Sealed Secrets controller
 lives), then:
 
 ```bash
+# feed kubeseal your FILLED-IN copy (the one with the real token), not the template
 kubeseal \
   --controller-namespace sealed-secrets \
   --controller-name sealed-secrets \
-  --context kind-cloudopshub-local \
+  --context cluster-1 \
   --format yaml \
-  < helm/argocd/add-cluster.yaml \
+  < /tmp/add-cluster-filled.yaml \
   > helm/argocd/add-cluster-sealed.yaml
+
+# remove the plaintext copy once sealed
+shred -u /tmp/add-cluster-filled.yaml 2>/dev/null || rm -f /tmp/add-cluster-filled.yaml
 ```
 
 ### Step 5 — Apply the sealed secret to cluster 1
 
 ```bash
-kubectl --context=kind-cloudopshub-local apply -f helm/argocd/add-cluster-sealed.yaml
+kubectl --context=cluster-1 apply -f helm/argocd/add-cluster-sealed.yaml
 ```
 
 The Sealed Secrets controller decrypts it into a normal `Secret` labelled
