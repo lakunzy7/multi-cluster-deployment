@@ -81,6 +81,12 @@ helm install cert-manager jetstack/cert-manager \
   -n cert-manager --create-namespace \
   --set crds.enabled=true
 
+# Install Kargo CLI v1.10.5 (matches your values.yaml)
+curl -L https://github.com/akuity/kargo/releases/download/v1.10.5/kargo-linux-amd64 \
+  -o /tmp/kargo && \
+  chmod +x /tmp/kargo && \
+  sudo mv /tmp/kargo /usr/local/bin/kargo
+
 # 2. Kargo
 helm repo add kargo https://charts.kargo.io
 helm repo update
