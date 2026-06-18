@@ -5,61 +5,61 @@
 #          helm install argocd argo/argo-cd -f helm/argocd/values.yaml -n argocd --create-namespace
 
 global:
-  domain: argocd.example.com
+    domain: argocd.example.com
 
 configs:
-  secret:
-    # Create initial admin password - change this!
-    argocdServerAdminPassword: $2a$10$rRyVfvhzz8.9500zyhksM.TCNA7qK8Kq.TCNA7qK8KqVb.9500zy
-    argocdServerAdminPasswordMtime: "2024-01-01T00:00:00Z"
+    secret:
+        # Create initial admin password - change this!
+        argocdServerAdminPassword: $2a$10$Wqsy0YV9CmI0YFnJxShTFO5nC3Z7eqiX36NLEFNTVY/93Jy/GoQlG
+        argocdServerAdminPasswordMtime: "2024-01-01T00:00:00Z"
 
 server:
-  # Service type - use LoadBalancer for cloud, ClusterIP for local
-  service:
-    type: ClusterIP
-    # type: LoadBalancer  # Uncomment for cloud deployments
+    # Service type - use LoadBalancer for cloud, ClusterIP for local
+    service:
+        type: ClusterIP
+        # type: LoadBalancer  # Uncomment for cloud deployments
 
-  # Ingress configuration
-  ingress:
-    enabled: false  # Enable if you have ingress controller
-    # ingressClassName: nginx
-    # hosts:
-    #   - argocd.example.com
-    # tls:
-    #   - secretName: argocd-tls
-    #     hosts:
-    #       - argocd.example.com
+    # Ingress configuration
+    ingress:
+        enabled: false # Enable if you have ingress controller
+        # ingressClassName: nginx
+        # hosts:
+        #   - argocd.example.com
+        # tls:
+        #   - secretName: argocd-tls
+        #     hosts:
+        #       - argocd.example.com
 
 repoServer:
-  # Repository server pod count
-  replicas: 1
+    # Repository server pod count
+    replicas: 1
 
 controller:
-  # Application controller pod count
-  replicas: 1
+    # Application controller pod count
+    replicas: 1
 
 redis:
-  # Redis pod count
-  replicas: 1
+    # Redis pod count
+    replicas: 1
 
 dex:
-  # Dex OIDC provider
-  enabled: true
-  replicas: 1
+    # Dex OIDC provider
+    enabled: true
+    replicas: 1
 
 applicationSet:
-  enabled: true
-  replicas: 1
+    enabled: true
+    replicas: 1
 
 notifications:
-  enabled: true
-  replicas: 1
+    enabled: true
+    replicas: 1
 
 crds:
-  # Install CRDs as part of the chart
-  install: true
-  keep: true
+    # Install CRDs as part of the chart
+    install: true
+    keep: true
 
 rbac:
-  # Install RBAC resources
-  create: true
+    # Install RBAC resources
+    create: true
