@@ -1,5 +1,5 @@
 backend:
-  tag: cfd86357
+  tag: 7cdcce8c
   replicas: 1
   resources:
     requests:
@@ -10,7 +10,7 @@ backend:
       cpu: "500m"
 
 frontend:
-  tag: cfd86357
+  tag: d8e3cc73
   replicas: 1
   resources:
     requests:
