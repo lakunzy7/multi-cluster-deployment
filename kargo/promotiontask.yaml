@@ -21,17 +21,12 @@ spec:
                   - branch: ${{ vars.branch }}
                     path: ./out
         - uses: yaml-update
-          as: update-backend-image
+          as: update-images
           config:
               path: ./out/env/${{ ctx.stage }}/values.yaml
               updates:
                   - key: backend.tag
                     value: ${{ imageFrom( vars.backendImage ).Tag }}
-        - uses: yaml-update
-          as: update-frontend-image
-          config:
-              path: ./out/env/${{ ctx.stage }}/values.yaml
-              updates:
                   - key: frontend.tag
                     value: ${{ imageFrom( vars.frontendImage ).Tag }}
         - uses: git-commit
